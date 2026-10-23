@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Customer or Administrator profile linked with Firebase Auth",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Authentication UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "name": { "type": "string", "description": "Display name" },
+        "role": { "type": "string", "enum": ["customer", "admin"], "description": "Access control role" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Organic fresh farm produce item in Rwanda catalog",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Numeric product ID" },
+        "name": { "type": "string", "description": "Product title" },
+        "category": { "type": "string", "description": "Category slug" },
+        "price": { "type": "number", "description": "Price in FRW" },
+        "spec": { "type": "string", "description": "Metric packaging spec" },
+        "rating": { "type": "string", "description": "Average review rating" },
+        "image": { "type": "string", "description": "Image asset URL" },
+        "origin": { "type": "string", "description": "Rwandan district origin" },
+        "farmer": { "type": "string", "description": "Cooperative name" },
+        "inStock": { "type": "boolean", "description": "Availability toggle" }
+      },
+      "required": ["name", "category", "price", "origin", "farmer"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer purchase delivery record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Human-readable code (e.g. FOFO-8842)" },
+        "customerName": { "type": "string", "description": "Recipient full name" },
+        "phone": { "type": "string", "description": "Contact telephone" },
+        "total": { "type": "number", "description": "Total order amount in FRW" },
+        "paymentMethod": { "type": "string", "enum": ["mtn", "airtel", "card", "cod"] },
+        "district": { "type": "string", "description": "Kigali destination district" },
+        "status": { "type": "string", "enum": ["Pending", "Preparing", "Out for Delivery", "Delivered"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "customerName", "phone", "total", "district", "status"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "System event audit trail entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique event identifier" },
+        "title": { "type": "string", "description": "Action summary" },
+        "detail": { "type": "string", "description": "Action details" },
+        "type": { "type": "string", "description": "Event category" },
+        "status": { "type": "string", "description": "Outcome severity" },
+        "actor": { "type": "string", "description": "Initiator name" },
+        "actorRole": { "type": "string", "description": "Actor role" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "type", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Registered customer and administrator accounts"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Fresh produce items sourced from Rwandan cooperatives"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Cold-chain grocery orders across Kigali"
+    },
+    "/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "Immutable operational system action audit log"
+    }
+  }
+}
