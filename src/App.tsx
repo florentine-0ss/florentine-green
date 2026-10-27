@@ -63,10 +63,11 @@ import { Footer } from './components/Footer';
 import { OrderTrackerModal } from './components/OrderTrackerModal';
 import { FarmPassportModal } from './components/FarmPassportModal';
 import { MealKitsSection } from './components/MealKitsSection';
+import { CommunityChatModal } from './components/CommunityChatModal';
 import { api, DatabaseHealth } from './services/api';
 
 // Icons
-import { SlidersHorizontal, CheckCircle2, Activity, ShieldCheck, Palette, Navigation, Database } from 'lucide-react';
+import { SlidersHorizontal, CheckCircle2, Activity, ShieldCheck, Palette, Navigation, Database, MessageSquare } from 'lucide-react';
 
 export default function App() {
   const [currentLang, setCurrentLang] = useState<Language>('en');
@@ -91,6 +92,7 @@ export default function App() {
   const [isSalesAttendantOpen, setIsSalesAttendantOpen] = useState(false);
   const [isAccountantOpen, setIsAccountantOpen] = useState(false);
   const [isCustomerMarketOpen, setIsCustomerMarketOpen] = useState(false);
+  const [isCommunityChatOpen, setIsCommunityChatOpen] = useState(false);
   const [activeReceiptModal, setActiveReceiptModal] = useState<SalesReceipt | null>(null);
 
   // Connect to persistent Node.js Express backend and database
@@ -964,6 +966,12 @@ export default function App() {
         onOpenOrderTracker={() => handleOpenOrderTracker()}
         isHeroMinimized={isHeroMinimized}
         onToggleMinimizeHero={handleToggleHeroMinimized}
+        onOpenStockManager={() => setIsStockManagerOpen(true)}
+        onOpenCashier={() => setIsCashierOpen(true)}
+        onOpenSalesAttendant={() => setIsSalesAttendantOpen(true)}
+        onOpenAccountant={() => setIsAccountantOpen(true)}
+        onOpenCustomerFruitMarket={() => setIsCustomerMarketOpen(true)}
+        onOpenCommunityChat={() => setIsCommunityChatOpen(true)}
       />
 
       {/* Hero Section with Live Search and Minimize Mode */}
@@ -1319,6 +1327,35 @@ export default function App() {
         onClose={() => setFarmPassportProduct(null)}
         currentLang={currentLang}
       />
+
+      {/* Real-Time Community Lounge & Member Chat Modal */}
+      <CommunityChatModal
+        isOpen={isCommunityChatOpen}
+        onClose={() => setIsCommunityChatOpen(false)}
+        currentUser={currentUser}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        availableProducts={products}
+        joinedUsers={users}
+      />
+
+      {/* Floating Member Lounge & Live Chat Capsule */}
+      <button
+        onClick={() => setIsCommunityChatOpen(true)}
+        className="fixed bottom-6 left-6 z-40 bg-emerald-900 hover:bg-emerald-800 active:scale-95 text-white px-4 py-2.5 rounded-full shadow-2xl border border-emerald-600/70 flex items-center gap-2.5 transition-all cursor-pointer group"
+        title="Open Fofo Green Member Lounge & Live Chat (Urubuga rw'Abanyamuryango)"
+      >
+        <div className="relative">
+          <MessageSquare className="w-4 h-4 text-emerald-300 transition-transform group-hover:scale-110" />
+          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+        </div>
+        <div className="flex flex-col text-left">
+          <span className="text-xs font-black tracking-tight leading-none flex items-center gap-1.5">
+            <span>Member Lounge</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          </span>
+          <span className="text-[9px] text-emerald-200 font-bold leading-none mt-0.5">Live Community Chat</span>
+        </div>
+      </button>
 
     </div>
   );

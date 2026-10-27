@@ -267,3 +267,82 @@ export type ColorTheme =
   | 'royal-forest' 
   | 'ruby-berry' 
   | 'midnight-emerald';
+
+export interface ChatAttachment {
+  id: string;
+  type: 'image' | 'file';
+  name: string;
+  url: string;
+  sizeFormatted?: string;
+  fileType?: string;
+}
+
+export interface ChatVoiceNote {
+  durationSeconds: number;
+  durationFormatted: string;
+  waveform: number[];
+  audioUrl?: string;
+}
+
+export interface ChatCallSession {
+  type: 'voice' | 'video';
+  status: 'connecting' | 'active' | 'ended';
+  startedBy: string;
+  startedByName: string;
+  channelId: string;
+  recipientName?: string;
+  durationSeconds: number;
+}
+
+// 4. Community & Member Chat Types
+export interface ChatMessage {
+  id: string;
+  channelId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: UserRole | 'customer' | 'admin' | string;
+  senderAvatar?: string;
+  content: string;
+  timestamp: string;
+  timeFormatted: string;
+  reactions?: Record<string, string[]>; // emoji: [userId]
+  replyTo?: {
+    id: string;
+    senderName: string;
+    content: string;
+  };
+  productTag?: {
+    id: number;
+    name: string;
+    price: number;
+    image: string;
+    spec?: string;
+  };
+  attachments?: ChatAttachment[];
+  voiceNote?: ChatVoiceNote;
+  callEvent?: {
+    type: 'voice' | 'video';
+    action: 'started' | 'ended' | 'missed';
+    duration?: string;
+  };
+  isDirectMessage?: boolean;
+  recipientId?: string;
+  recipientName?: string;
+}
+
+export interface ChatChannel {
+  id: string;
+  name: string;
+  nameRw?: string;
+  description: string;
+  icon: string;
+  category: 'public' | 'staff' | 'market';
+  badge?: string;
+}
+
+export interface ChatOnlineUser {
+  userId: string;
+  userName: string;
+  role: string;
+  lastSeen?: string;
+}

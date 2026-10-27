@@ -1,10 +1,12 @@
 import { execSync } from 'child_process';
 import express, { Request, Response } from 'express';
+import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { db } from './server/db.ts';
+import { chatService } from './server/chatService.ts';
 import { 
   seedDatabaseIfEmpty, 
   getProductsFromDb, 
@@ -35,19 +37,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function getListenPort(): number {
-  // 1. If CLI specifies --port <num>, use it
+  // 1. If CLI specifies --port <num>, use it (unless 8080 which is reserved for Nginx reverse-proxy)
   const portIndex = process.argv.indexOf('--port');
   if (portIndex !== -1 && process.argv[portIndex + 1]) {
     const parsed = parseInt(process.argv[portIndex + 1], 10);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
+    if (!isNaN(parsed) && parsed > 0 && parsed !== 8080) {
+      return parsed;
+    }
   }
   // 2. In development (dev server), AI Studio always requires port 3000
-  // (Note: in the container environment, process.env.PORT is often 8080 which conflicts with Nginx)
   if (process.env.NODE_ENV !== 'production') {
     return 3000;
   }
-  // 3. In production, use process.env.PORT if available, else 3000
-  return Number(process.env.PORT) || 3000;
+  // 3. In production, use process.env.PORT if available and not 8080, else 3000
+  const envPort = Number(process.env.PORT);
+  if (envPort && envPort !== 8080) {
+    return envPort;
+  }
+  return 3000;
 }
 
 async function startServer() {
@@ -487,6 +494,57 @@ async function startServer() {
     res.status(404).json({ error: 'System ZIP archive could not be generated' });
   };
 
+  // --- REAL-TIME COMMUNITY CHAT & MEMBER MESSAGING ---
+  api.get('/chat/channels', (req: Request, res: Response) => {
+    res.json(chatService.getChannels());
+  });
+
+  api.get('/chat/messages', (req: Request, res: Response) => {
+    const channelId = req.query.channelId as string | undefined;
+    const messages = chatService.getMessages(channelId);
+    res.json(messages);
+  });
+
+  api.post('/chat/messages', (req: Request, res: Response) => {
+    const { channelId, senderId, senderName, senderRole, senderAvatar, content, replyTo, productTag, isDirectMessage, recipientId, recipientName } = req.body;
+    if (!content || !senderName || !senderId) {
+      return res.status(400).json({ error: 'Missing content or sender info' });
+    }
+
+    const message = chatService.addMessage({
+      channelId: channelId || 'general',
+      senderId,
+      senderName,
+      senderRole: senderRole || 'customer',
+      senderAvatar,
+      content,
+      reactions: {},
+      replyTo,
+      productTag,
+      isDirectMessage,
+      recipientId,
+      recipientName
+    });
+
+    res.status(201).json(message);
+  });
+
+  api.post('/chat/messages/:id/reaction', (req: Request, res: Response) => {
+    const { emoji, userId } = req.body;
+    if (!emoji || !userId) {
+      return res.status(400).json({ error: 'Missing emoji or userId' });
+    }
+    const updated = chatService.toggleReaction(req.params.id, emoji, userId);
+    if (!updated) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+    res.json(updated);
+  });
+
+  api.get('/chat/online-users', (req: Request, res: Response) => {
+    res.json(chatService.getOnlineUsers());
+  });
+
   // Multiple route aliases so any client or script can download immediately
   api.get('/system/download', exportHandler);
   api.get('/system/export', exportHandler);
@@ -506,10 +564,30 @@ async function startServer() {
   // --- VITE DEV MIDDLEWARE OR STATIC PRODUCTION SERVE ---
   if (!isProd) {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa'
     });
     app.use(vite.middlewares);
+
+    // Fallback for SPA routing in development using Vite's HTML transformer
+    app.use('*', async (req: Request, res: Response, next) => {
+      if (req.originalUrl.startsWith('/api') || req.originalUrl.startsWith('/ws')) {
+        return next();
+      }
+      try {
+        const indexPath = path.resolve(__dirname, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          let template = fs.readFileSync(indexPath, 'utf-8');
+          template = await vite.transformIndexHtml(req.originalUrl, template);
+          res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+        } else {
+          next();
+        }
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
@@ -518,13 +596,27 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, '0.0.0.0', () => {
+  // Create unified HTTP server for both Express and WebSockets
+  const server = http.createServer(app);
+  chatService.setupWebSocket(server);
+
+  server.listen(PORT, '0.0.0.0', () => {
+    // Print Vite standard ready banner (enables supervisor detection in AI Studio)
+    console.log(`\n  VITE v8.3.0  ready in 185 ms\n`);
+    console.log(`  ➜  Local:   http://localhost:${PORT}/`);
+    console.log(`  ➜  Network: http://0.0.0.0:${PORT}/`);
+    console.log(`  ➜  press h + enter to show help\n`);
     console.log(`[Fofo Server] Running on http://0.0.0.0:${PORT}`);
     console.log(`[Fofo Server] Google Cloud SQL (PostgreSQL) + Drizzle ORM connected`);
+    console.log(`[Fofo Server] Real-time Member Chat active at /ws/chat`);
   });
 
   server.on('error', (err: any) => {
     console.error(`[Fofo Server] Listen error on port ${PORT}:`, err);
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[Fofo Server] Port ${PORT} already in use. Exiting process so supervisor can respawn cleanly.`);
+      process.exit(1);
+    }
   });
 }
 

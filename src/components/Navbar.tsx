@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   ShoppingCart, Heart, User as UserIcon, Globe, ShieldCheck, 
   Menu, X, Palette, Navigation, Minimize2, Maximize2, ChevronDown,
-  Sparkles, Check, LogOut, PackageCheck, Layers, Download
+  Sparkles, Check, LogOut, PackageCheck, Layers, Download, Compass, MessageSquare
 } from 'lucide-react';
 import { Language, User, ColorTheme } from '../types';
 import { TRANSLATIONS } from '../data/translations';
@@ -24,6 +24,12 @@ interface NavbarProps {
   onOpenOrderTracker?: () => void;
   isHeroMinimized?: boolean;
   onToggleMinimizeHero?: () => void;
+  onOpenStockManager?: () => void;
+  onOpenCashier?: () => void;
+  onOpenSalesAttendant?: () => void;
+  onOpenAccountant?: () => void;
+  onOpenCustomerFruitMarket?: () => void;
+  onOpenCommunityChat?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,10 +48,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenThemeSelector,
   onOpenOrderTracker,
   isHeroMinimized = true,
-  onToggleMinimizeHero
+  onToggleMinimizeHero,
+  onOpenStockManager,
+  onOpenCashier,
+  onOpenSalesAttendant,
+  onOpenAccountant,
+  onOpenCustomerFruitMarket,
+  onOpenCommunityChat
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [selectedNavOption, setSelectedNavOption] = useState<string>('home');
   const dropdownRef = useRef<HTMLDivElement>(null);
   const t = TRANSLATIONS[currentLang].nav;
 
@@ -70,6 +83,51 @@ export const Navbar: React.FC<NavbarProps> = ({
     if (element) {
       element.scrollIntoView({ behavior: 'smooth' });
     }
+  };
+
+  const handleNavSelect = (value: string) => {
+    if (!value) return;
+    setSelectedNavOption(value);
+
+    // 1. Store Sections
+    if (['home', 'shop', 'baskets', 'delivery', 'about', 'contact'].includes(value)) {
+      scrollTo(value);
+    } 
+    // 2. Quick Features & Tools
+    else if (value === 'community-chat') {
+      onOpenCommunityChat?.();
+    } else if (value === 'order-tracker') {
+      onOpenOrderTracker?.();
+    } else if (value === 'toggle-banner') {
+      onToggleMinimizeHero?.();
+    } else if (value === 'download-zip') {
+      window.location.href = '/api/system/download-zip';
+    } else if (value === 'theme-selector') {
+      onOpenThemeSelector();
+    } else if (value === 'wishlist') {
+      onOpenWishlist();
+    } else if (value === 'cart') {
+      onOpenCart();
+    }
+    // 3. Operational Role Workspaces
+    else if (value === 'role-admin') {
+      onOpenAdmin();
+    } else if (value === 'role-stock') {
+      onOpenStockManager?.();
+    } else if (value === 'role-cashier') {
+      onOpenCashier?.();
+    } else if (value === 'role-sales') {
+      onOpenSalesAttendant?.();
+    } else if (value === 'role-accountant') {
+      onOpenAccountant?.();
+    } else if (value === 'role-customer') {
+      onOpenCustomerFruitMarket?.();
+    }
+
+    // Keep active option clean
+    setTimeout(() => {
+      setSelectedNavOption('home');
+    }, 1000);
   };
 
   return (
@@ -103,100 +161,78 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* 2. PRIMARY NAV LINKS (Center - Clear & Balanced) */}
-          <nav className="hidden lg:flex items-center gap-1 xl:gap-2">
-            <button
-              onClick={() => scrollTo('home')}
-              className="px-3 py-1.5 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-semibold text-xs xl:text-sm transition-all cursor-pointer"
-            >
-              {t.home || 'Home'}
-            </button>
-            <button
-              onClick={() => scrollTo('shop')}
-              className="px-3 py-1.5 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-semibold text-xs xl:text-sm transition-all cursor-pointer"
-            >
-              {t.shop}
-            </button>
-            <button
-              onClick={() => scrollTo('baskets')}
-              className="px-3 py-1.5 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-semibold text-xs xl:text-sm transition-all cursor-pointer flex items-center gap-1.5"
-            >
-              <span>Recipe Baskets</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 text-[9px] font-extrabold uppercase">
-                Kits
-              </span>
-            </button>
-            <button
-              onClick={() => scrollTo('delivery')}
-              className="px-3 py-1.5 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-semibold text-xs xl:text-sm transition-all cursor-pointer"
-            >
-              {t.delivery}
-            </button>
-            <button
-              onClick={() => scrollTo('about')}
-              className="px-3 py-1.5 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-semibold text-xs xl:text-sm transition-all cursor-pointer"
-            >
-              {t.about}
-            </button>
-            <button
-              onClick={() => scrollTo('contact')}
-              className="px-3 py-1.5 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-semibold text-xs xl:text-sm transition-all cursor-pointer"
-            >
-              {t.contact}
-            </button>
-          </nav>
+          {/* 2. UNIFIED NAVIGATION SELECT (Drastically Reduces Crowded Buttons) */}
+          <div className="flex items-center gap-2 flex-1 max-w-xs sm:max-w-md mx-2 sm:mx-4">
+            <div className="relative flex items-center w-full bg-stone-100 hover:bg-stone-200/70 border border-stone-300/80 rounded-xl px-2.5 py-1.5 transition-all shadow-2xs group focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500">
+              <Compass className="w-4 h-4 text-theme-primary shrink-0 mr-1.5 transition-transform group-hover:rotate-45" />
+              
+              <div className="flex flex-col flex-1 min-w-0">
+                <div className="flex items-center justify-between text-[9px] uppercase tracking-wider font-extrabold text-stone-500 leading-none mb-0.5">
+                  <span>Navigation Menu</span>
+                  <span className="text-[8px] text-emerald-700 font-bold hidden sm:inline">Select Option</span>
+                </div>
+                
+                <select
+                  value={selectedNavOption}
+                  onChange={(e) => handleNavSelect(e.target.value)}
+                  className="bg-transparent text-stone-900 font-bold outline-hidden cursor-pointer text-xs w-full appearance-none pr-4"
+                  aria-label="Navigation select options to reduce button clutter"
+                >
+                  <optgroup label="── Store Pages & Catalog ──">
+                    <option value="home">🏡 Home & Fresh Produce</option>
+                    <option value="shop">🥬 Shop All Organic Items</option>
+                    <option value="baskets">🧺 Recipe Baskets & Kits</option>
+                    <option value="delivery">🛵 Kigali Express Delivery</option>
+                    <option value="about">🌿 About Fofo Green & Rwandan Farms</option>
+                    <option value="contact">📞 Contact & WhatsApp Order</option>
+                  </optgroup>
 
-          {/* 3. UTILITY & CONTROLS (Right - Structured, Clear, Never Crowded) */}
-          <div className="flex items-center gap-1 sm:gap-2">
-            
-            {/* 100% Minimized / Full Banner Toggle Button */}
-            {onToggleMinimizeHero && (
+                  <optgroup label="── Quick Features & Actions ──">
+                    <option value="community-chat">💬 Member Chat & Community Lounge (Live)</option>
+                    <option value="order-tracker">📍 Live Order GPS Radar</option>
+                    <option value="toggle-banner">🖼️ {isHeroMinimized ? 'Expand Full Banner' : 'Compact Store View'}</option>
+                    <option value="download-zip">📦 Download System Folder (ZIP)</option>
+                    <option value="theme-selector">🎨 Color Theme Customizer</option>
+                    <option value="wishlist">❤️ Wishlist ({wishlistCount} items)</option>
+                    <option value="cart">🛒 Shopping Basket ({cartCount} items)</option>
+                  </optgroup>
+
+                  <optgroup label="── 6 System Role Workspaces ──">
+                    <option value="role-admin">👑 1. Admin Control & Profit Reports</option>
+                    <option value="role-stock">📦 2. Stock Manager (PO & Damaged Stock)</option>
+                    <option value="role-cashier">💳 3. Cashier POS Register (Cash & MoMo)</option>
+                    <option value="role-sales">🤝 4. Sales Floor Attendant (Basket Assist)</option>
+                    <option value="role-accountant">📊 5. Accountant Financial P&L & Margins</option>
+                    <option value="role-customer">🍎 6. Customer Fruit Market & Reviews</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              <ChevronDown className="w-3.5 h-3.5 text-stone-500 absolute right-2.5 pointer-events-none" />
+            </div>
+
+            {/* Subtle High-Frequency Shortcuts (Only 2 clean text links on wide desktops, no button clutter) */}
+            <nav className="hidden 2xl:flex items-center gap-1 shrink-0">
               <button
-                onClick={onToggleMinimizeHero}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-2xs cursor-pointer ${
-                  isHeroMinimized
-                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                    : 'border-stone-200 bg-stone-50 text-stone-700 hover:bg-stone-100'
-                }`}
-                title={isHeroMinimized ? "Banner is minimized (100% clear store view). Click to expand visual banner." : "Click to minimize banner 100% and view store directly"}
+                onClick={() => scrollTo('shop')}
+                className="px-2.5 py-1 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-bold text-xs transition-colors cursor-pointer"
               >
-                {isHeroMinimized ? (
-                  <>
-                    <Maximize2 className="w-3.5 h-3.5 text-emerald-700" />
-                    <span className="hidden sm:inline">Expand Banner</span>
-                  </>
-                ) : (
-                  <>
-                    <Minimize2 className="w-3.5 h-3.5 text-stone-500" />
-                    <span className="hidden sm:inline">Compact View</span>
-                  </>
-                )}
+                {t.shop}
               </button>
-            )}
-
-            {/* Track Order Radar Pill */}
-            {onOpenOrderTracker && (
               <button
-                onClick={onOpenOrderTracker}
-                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 text-xs font-semibold transition-all shadow-2xs group cursor-pointer"
-                title="Track active delivery order & live Kigali GPS radar"
+                onClick={() => scrollTo('baskets')}
+                className="px-2.5 py-1 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1"
               >
-                <Navigation className="w-3.5 h-3.5 text-theme-primary transition-transform group-hover:scale-110" />
-                <span className="hidden xl:inline">Track Order</span>
+                <span>Kits</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 text-[8px] font-black uppercase">
+                  New
+                </span>
               </button>
-            )}
+            </nav>
+          </div>
 
-            {/* Direct Download System ZIP Folder Button */}
-            <a
-              href="/api/system/download-zip"
-              download="fofogreen-system.zip"
-              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-purple-200 bg-purple-50/80 hover:bg-purple-100 text-purple-900 text-xs font-bold transition-all shadow-2xs group cursor-pointer"
-              title="Download full Fofo Green system folder & codebase as ZIP"
-            >
-              <Download className="w-3.5 h-3.5 text-purple-700 transition-transform group-hover:translate-y-0.5" />
-              <span className="hidden xl:inline">Download System (ZIP)</span>
-              <span className="xl:hidden">ZIP</span>
-            </a>
+          {/* 3. STREAMLINED UTILITY CONTROLS (Right - Only Core Actions, No Button Overload) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
 
             {/* Language Selector (Clean Pill) */}
             <div className="relative flex items-center bg-stone-100/90 rounded-xl px-2 py-1.5 border border-stone-200 text-xs">
@@ -214,6 +250,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <option value="ar">AR</option>
               </select>
             </div>
+
+            {/* Community Live Member Chat Trigger Button */}
+            {onOpenCommunityChat && (
+              <button
+                onClick={onOpenCommunityChat}
+                className="relative p-2 rounded-xl text-stone-700 hover:text-emerald-800 hover:bg-emerald-50 transition-colors cursor-pointer border border-stone-200 bg-stone-50"
+                aria-label="Community Live Chat"
+                title="Open Member & Community Live Chat Lounge"
+              >
+                <MessageSquare className="w-4 h-4 text-emerald-800" />
+                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white animate-pulse" />
+              </button>
+            )}
 
             {/* Wishlist Button */}
             <button
@@ -307,6 +356,25 @@ export const Navbar: React.FC<NavbarProps> = ({
 
                   {/* Actions in Dropdown */}
                   <div className="p-1 space-y-0.5">
+                    {onOpenCommunityChat && (
+                      <button
+                        onClick={() => {
+                          setUserDropdownOpen(false);
+                          onOpenCommunityChat();
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold flex items-center justify-between cursor-pointer transition-colors"
+                      >
+                        <span className="flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 text-emerald-700" />
+                          <span>Community Member Lounge</span>
+                        </span>
+                        <span className="bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                          <span>Live Chat</span>
+                        </span>
+                      </button>
+                    )}
+
                     <button
                       onClick={() => {
                         setUserDropdownOpen(false);

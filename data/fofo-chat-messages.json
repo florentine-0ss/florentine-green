@@ -1,0 +1,146 @@
+[
+  {
+    "id": "msg-seed-1",
+    "channelId": "general",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "content": "Murakaza neza! Welcome everyone to the Fofo Green Community & Member Lounge! Here you can connect with our farm partners, fellow shoppers, and floor staff in real time. Feel free to share your organic cooking tips or ask anything! 🌿",
+    "timestamp": "2026-10-26T09:48:04.715Z",
+    "timeFormatted": "4 hrs ago",
+    "reactions": {
+      "🌿": [
+        "usr-customer-1",
+        "usr-sales",
+        "usr-customer-2"
+      ],
+      "❤️": [
+        "usr-stock",
+        "usr-customer-3"
+      ],
+      "🔥": [
+        "usr-admin"
+      ]
+    }
+  },
+  {
+    "id": "msg-seed-2",
+    "channelId": "general",
+    "senderId": "usr-customer-1",
+    "senderName": "Divine Uwase",
+    "senderRole": "customer",
+    "content": "Muraho Florentine! I just received my Isombe recipe kit today in Kacyiru. The fresh pounded cassava leaves and volcanic leeks were extraordinary! Will make it for family dinner tonight.",
+    "timestamp": "2026-10-26T10:48:04.715Z",
+    "timeFormatted": "3 hrs ago",
+    "reactions": {
+      "🍲": [
+        "usr-admin",
+        "usr-sales"
+      ],
+      "🔥": [
+        "usr-customer-2"
+      ]
+    }
+  },
+  {
+    "id": "msg-seed-3",
+    "channelId": "fresh-harvest",
+    "senderId": "usr-stock",
+    "senderName": "Eric Mugisha",
+    "senderRole": "stock_manager",
+    "content": "Good morning Kigali! We just received 250 kg of fresh Hass Avocados from the Volcano Foothills Cooperative in Musanze, plus sweet yellow passion fruits. All RSB certified organic.",
+    "timestamp": "2026-10-26T11:18:04.715Z",
+    "timeFormatted": "2 hrs ago",
+    "reactions": {
+      "🥑": [
+        "usr-customer-1",
+        "usr-customer-3",
+        "usr-sales"
+      ]
+    },
+    "productTag": {
+      "id": 7,
+      "name": "Creamy Hass Avocados",
+      "price": 2200,
+      "image": "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?auto=format&fit=crop&w=700&q=80",
+      "spec": "1 kg (approx. 4-5 pcs)"
+    }
+  },
+  {
+    "id": "msg-seed-4",
+    "channelId": "fresh-harvest",
+    "senderId": "usr-customer-3",
+    "senderName": "Sarah Mitchell",
+    "senderRole": "customer",
+    "content": "Eric, are the avocados ready-to-eat today or do they need a couple of days to soften on the counter?",
+    "timestamp": "2026-10-26T11:48:04.715Z",
+    "timeFormatted": "2 hrs ago",
+    "reactions": {}
+  },
+  {
+    "id": "msg-seed-5",
+    "channelId": "fresh-harvest",
+    "senderId": "usr-sales",
+    "senderName": "Kevin Niyonzima",
+    "senderRole": "sales_attendant",
+    "content": "Hi Sarah! About half the batch is gently yielding and perfect for today's guacamole, while the rest can ripen over 2–3 days. You can specify \"Ripe for Today\" in your order notes!",
+    "timestamp": "2026-10-26T12:00:04.715Z",
+    "timeFormatted": "1 hr ago",
+    "reactions": {
+      "👍": [
+        "usr-customer-3"
+      ]
+    },
+    "replyTo": {
+      "id": "msg-seed-4",
+      "senderName": "Sarah Mitchell",
+      "content": "Eric, are the avocados ready-to-eat today or do they need a couple of days..."
+    }
+  },
+  {
+    "id": "msg-seed-6",
+    "channelId": "delivery-kigali",
+    "senderId": "usr-customer-2",
+    "senderName": "Jean-Luc Habimana",
+    "senderRole": "customer",
+    "content": "Kudos to driver Patrick on Solar Moto #12! Order arrived in Niboye in under 20 minutes, fish was perfectly chilled on ice.",
+    "timestamp": "2026-10-26T12:36:04.715Z",
+    "timeFormatted": "1 hr ago",
+    "reactions": {
+      "⚡": [
+        "usr-admin",
+        "usr-cashier"
+      ],
+      "👏": [
+        "usr-customer-1"
+      ]
+    }
+  },
+  {
+    "id": "msg-seed-7",
+    "channelId": "staff-support",
+    "senderId": "usr-cashier",
+    "senderName": "Chantal Uwera",
+    "senderRole": "cashier",
+    "content": "Just a reminder that both MTN MoMo (*182#) and Airtel Money (*175#) transactions issue instant digital receipts with RRA compliance QR codes right to your screen or WhatsApp! Let us know if you need any billing confirmation.",
+    "timestamp": "2026-10-26T13:00:04.715Z",
+    "timeFormatted": "45 mins ago",
+    "reactions": {
+      "💳": [
+        "usr-admin",
+        "usr-customer-2"
+      ]
+    }
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "content": "Testing real-time community chat connection!",
+    "reactions": {},
+    "id": "msg-1793022491932-qpu0x",
+    "timestamp": "2026-10-26T13:48:11.932Z",
+    "timeFormatted": "01:48 PM"
+  }
+]
