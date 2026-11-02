@@ -94,9 +94,11 @@ export default function App() {
   const [isCustomerMarketOpen, setIsCustomerMarketOpen] = useState(false);
   const [isCommunityChatOpen, setIsCommunityChatOpen] = useState(false);
   const [activeReceiptModal, setActiveReceiptModal] = useState<SalesReceipt | null>(null);
+  const [openChatAfterLogin, setOpenChatAfterLogin] = useState(false);
 
   const openCommunityChat = () => {
     if (!currentUser) {
+      setOpenChatAfterLogin(true);
       setIsAuthOpen(true);
       showToast('Please sign in to join the member chat');
       return;
@@ -806,7 +808,12 @@ export default function App() {
   // User login handler
   const handleUserLogin = (user: User) => {
     setCurrentUser(user);
-    
+    setUsers((prev) => [user, ...prev.filter((member) => member.id !== user.id)]);
+    if (openChatAfterLogin) {
+      setIsCommunityChatOpen(true);
+      setOpenChatAfterLogin(false);
+    }
+
     const authAct: SystemActivity = {
       id: `ACT-AUTH-${Date.now().toString().slice(-4)}`,
       title: user.role === 'admin' ? 'Admin Session Authenticated' : 'Customer Account Login',

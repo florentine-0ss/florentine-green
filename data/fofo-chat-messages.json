@@ -185,5 +185,17 @@
     "id": "msg-1793622953805-kaklc",
     "timestamp": "2026-11-02T12:35:53.805Z",
     "timeFormatted": "12:35 PM"
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-2084",
+    "senderName": "ange",
+    "senderRole": "customer",
+    "content": "hy",
+    "reactions": {},
+    "isDirectMessage": false,
+    "id": "msg-1793626474669-b479p",
+    "timestamp": "2026-11-02T13:34:34.669Z",
+    "timeFormatted": "01:34 PM"
   }
 ]
