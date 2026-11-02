@@ -76,7 +76,7 @@ export default function App() {
   const [activities, setActivities] = useState<SystemActivity[]>(INITIAL_ACTIVITIES);
   const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
-  const [currentUser, setCurrentUser] = useState<User | null>(INITIAL_USERS[0]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [dbHealth, setDbHealth] = useState<DatabaseHealth | null>(null);
 
   // 6 Roles Operational Domain States

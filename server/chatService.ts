@@ -406,9 +406,16 @@ class ChatService {
 
             case 'chat:send': {
               const payload = parsed.payload;
-              if (payload && payload.content && payload.senderId) {
-                this.addMessage(payload);
-              }
+              const meta = this.connectedSockets.get(ws);
+              if (!meta?.userId || !payload?.content) break;
+
+              // Trust the authenticated socket identity, never a client-supplied sender.
+              this.addMessage({
+                ...payload,
+                senderId: meta.userId,
+                senderName: meta.userName || 'Joined Member',
+                senderRole: meta.role || 'customer'
+              });
               break;
             }
 
