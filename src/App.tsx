@@ -95,6 +95,15 @@ export default function App() {
   const [isCommunityChatOpen, setIsCommunityChatOpen] = useState(false);
   const [activeReceiptModal, setActiveReceiptModal] = useState<SalesReceipt | null>(null);
 
+  const openCommunityChat = () => {
+    if (!currentUser) {
+      setIsAuthOpen(true);
+      showToast('Please sign in to join the member chat');
+      return;
+    }
+    setIsCommunityChatOpen(true);
+  };
+
   // Connect to persistent Node.js Express backend and database
   useEffect(() => {
     async function loadBackendData() {
@@ -971,7 +980,7 @@ export default function App() {
         onOpenSalesAttendant={() => setIsSalesAttendantOpen(true)}
         onOpenAccountant={() => setIsAccountantOpen(true)}
         onOpenCustomerFruitMarket={() => setIsCustomerMarketOpen(true)}
-        onOpenCommunityChat={() => setIsCommunityChatOpen(true)}
+        onOpenCommunityChat={openCommunityChat}
       />
 
       {/* Hero Section with Live Search and Minimize Mode */}
@@ -1340,7 +1349,7 @@ export default function App() {
 
       {/* Floating Member Lounge & Live Chat Capsule */}
       <button
-        onClick={() => setIsCommunityChatOpen(true)}
+        onClick={openCommunityChat}
         className="fixed bottom-6 left-6 z-40 bg-emerald-900 hover:bg-emerald-800 active:scale-95 text-white px-4 py-2.5 rounded-full shadow-2xl border border-emerald-600/70 flex items-center gap-2.5 transition-all cursor-pointer group"
         title="Open Fofo Green Member Lounge & Live Chat (Urubuga rw'Abanyamuryango)"
       >
