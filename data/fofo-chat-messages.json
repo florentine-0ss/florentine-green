@@ -197,5 +197,41 @@
     "id": "msg-1793626474669-b479p",
     "timestamp": "2026-11-02T13:34:34.669Z",
     "timeFormatted": "01:34 PM"
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-admin-1",
+    "senderName": "Florentine Mushimiyimana (Admin)",
+    "senderRole": "admin",
+    "content": "hy",
+    "reactions": {},
+    "isDirectMessage": false,
+    "id": "msg-1793626777997-kys0j",
+    "timestamp": "2026-11-02T13:39:37.997Z",
+    "timeFormatted": "01:39 PM"
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-admin-1",
+    "senderName": "Florentine Mushimiyimana (Admin)",
+    "senderRole": "admin",
+    "content": "mumezemutex",
+    "reactions": {},
+    "isDirectMessage": false,
+    "id": "msg-1793626784267-1dzyn",
+    "timestamp": "2026-11-02T13:39:44.267Z",
+    "timeFormatted": "01:39 PM"
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-accountant",
+    "senderName": "Aimee Mukamana",
+    "senderRole": "accountant",
+    "content": "tumezeneza mwenwes",
+    "reactions": {},
+    "isDirectMessage": false,
+    "id": "msg-1793626852385-1c0rw",
+    "timestamp": "2026-11-02T13:40:52.385Z",
+    "timeFormatted": "01:40 PM"
   }
 ]
