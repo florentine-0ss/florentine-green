@@ -142,5 +142,60 @@
     "id": "msg-1793022491932-qpu0x",
     "timestamp": "2026-10-26T13:48:11.932Z",
     "timeFormatted": "01:48 PM"
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "content": "📹 Video Consultation started by Florentine Mushimiyimana. Connected live!",
+    "callEvent": {
+      "type": "video",
+      "action": "started"
+    },
+    "id": "msg-1793622917662-79ezx",
+    "timestamp": "2026-11-02T12:35:17.662Z",
+    "timeFormatted": "12:35 PM",
+    "reactions": {}
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "content": "📹 Video Consultation finished. Total duration: 0m 18s.",
+    "callEvent": {
+      "type": "video",
+      "action": "ended",
+      "duration": "0m 18s"
+    },
+    "id": "msg-1793622936211-w1jqd",
+    "timestamp": "2026-11-02T12:35:36.211Z",
+    "timeFormatted": "12:35 PM",
+    "reactions": {}
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "content": "hello",
+    "reactions": {},
+    "isDirectMessage": false,
+    "id": "msg-1793622953805-kaklc",
+    "timestamp": "2026-11-02T12:35:53.805Z",
+    "timeFormatted": "12:35 PM"
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-2084",
+    "senderName": "ange",
+    "senderRole": "customer",
+    "content": "hy",
+    "reactions": {},
+    "isDirectMessage": false,
+    "id": "msg-1793626474669-b479p",
+    "timestamp": "2026-11-02T13:34:34.669Z",
+    "timeFormatted": "01:34 PM"
   }
 ]

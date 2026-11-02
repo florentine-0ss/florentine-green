@@ -76,7 +76,7 @@ export default function App() {
   const [activities, setActivities] = useState<SystemActivity[]>(INITIAL_ACTIVITIES);
   const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
-  const [currentUser, setCurrentUser] = useState<User | null>(INITIAL_USERS[0]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [dbHealth, setDbHealth] = useState<DatabaseHealth | null>(null);
 
   // 6 Roles Operational Domain States
@@ -94,6 +94,17 @@ export default function App() {
   const [isCustomerMarketOpen, setIsCustomerMarketOpen] = useState(false);
   const [isCommunityChatOpen, setIsCommunityChatOpen] = useState(false);
   const [activeReceiptModal, setActiveReceiptModal] = useState<SalesReceipt | null>(null);
+  const [openChatAfterLogin, setOpenChatAfterLogin] = useState(false);
+
+  const openCommunityChat = () => {
+    if (!currentUser) {
+      setOpenChatAfterLogin(true);
+      setIsAuthOpen(true);
+      showToast('Please sign in to join the member chat');
+      return;
+    }
+    setIsCommunityChatOpen(true);
+  };
 
   // Connect to persistent Node.js Express backend and database
   useEffect(() => {
@@ -797,7 +808,12 @@ export default function App() {
   // User login handler
   const handleUserLogin = (user: User) => {
     setCurrentUser(user);
-    
+    setUsers((prev) => [user, ...prev.filter((member) => member.id !== user.id)]);
+    if (openChatAfterLogin) {
+      setIsCommunityChatOpen(true);
+      setOpenChatAfterLogin(false);
+    }
+
     const authAct: SystemActivity = {
       id: `ACT-AUTH-${Date.now().toString().slice(-4)}`,
       title: user.role === 'admin' ? 'Admin Session Authenticated' : 'Customer Account Login',
@@ -971,7 +987,7 @@ export default function App() {
         onOpenSalesAttendant={() => setIsSalesAttendantOpen(true)}
         onOpenAccountant={() => setIsAccountantOpen(true)}
         onOpenCustomerFruitMarket={() => setIsCustomerMarketOpen(true)}
-        onOpenCommunityChat={() => setIsCommunityChatOpen(true)}
+        onOpenCommunityChat={openCommunityChat}
       />
 
       {/* Hero Section with Live Search and Minimize Mode */}
@@ -1340,7 +1356,7 @@ export default function App() {
 
       {/* Floating Member Lounge & Live Chat Capsule */}
       <button
-        onClick={() => setIsCommunityChatOpen(true)}
+        onClick={openCommunityChat}
         className="fixed bottom-6 left-6 z-40 bg-emerald-900 hover:bg-emerald-800 active:scale-95 text-white px-4 py-2.5 rounded-full shadow-2xl border border-emerald-600/70 flex items-center gap-2.5 transition-all cursor-pointer group"
         title="Open Fofo Green Member Lounge & Live Chat (Urubuga rw'Abanyamuryango)"
       >
