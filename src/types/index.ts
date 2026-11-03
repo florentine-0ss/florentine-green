@@ -346,3 +346,53 @@ export interface ChatOnlineUser {
   role: string;
   lastSeen?: string;
 }
+
+export interface MoMoTransaction {
+  referenceId: string;
+  externalId: string;
+  amount: number;
+  currency: string;
+  payerPhone: string;
+  customerName: string;
+  status: 'PENDING' | 'SUCCESSFUL' | 'FAILED' | 'REJECTED';
+  financialTransactionId?: string;
+  initiatedAt: string;
+  completedAt?: string;
+  payerMessage: string;
+  payeeNote: string;
+  failureReason?: string;
+}
+
+export interface EbmFiscalReceipt {
+  fiscalReceiptNumber: string;
+  sdcId: string;
+  mrc: string;
+  issuedAt: string;
+  buyerTin: string;
+  buyerName: string;
+  buyerPhone?: string;
+  taxSummary: {
+    taxableAmountA: number; // 0% Exempt (Fresh produce)
+    taxAmountA: number;
+    taxableAmountB: number; // 18% Standard VAT
+    taxAmountB: number;
+    totalTax: number;
+    grandTotal: number;
+  };
+  internalData: string;
+  receiptSignature: string;
+  rraQrCodeUrl: string;
+  rraSyncStatus: 'TRANSMITTED' | 'QUEUED';
+  sdcReceiptCounter: number;
+}
+
+export interface PresenceToast {
+  id: string;
+  type: 'member_joined' | 'new_message' | 'admin_directive';
+  user?: ChatOnlineUser;
+  message?: ChatMessage;
+  title: string;
+  subtitle: string;
+  timestamp: number;
+}
+

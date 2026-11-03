@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   BarChart3, 
@@ -19,9 +19,13 @@ import {
   ArrowDownRight,
   Filter,
   Search,
-  Scale
+  Scale,
+  QrCode,
+  Smartphone,
+  Check
 } from 'lucide-react';
-import { Product, FinancialRecord, ProfitAndLossReport, SalesReceipt } from '../types';
+import { Product, FinancialRecord, ProfitAndLossReport, SalesReceipt, EbmFiscalReceipt } from '../types';
+import { api } from '../services/api';
 
 interface AccountantWorkspaceProps {
   isOpen: boolean;
@@ -42,8 +46,21 @@ export const AccountantWorkspace: React.FC<AccountantWorkspaceProps> = ({
   receipts,
   accountantName = 'Aimee Mukamana'
 }) => {
-  const [activeTab, setActiveTab] = useState<'pnl' | 'ledger' | 'margins' | 'reports'>('pnl');
+  const [activeTab, setActiveTab] = useState<'pnl' | 'ledger' | 'margins' | 'reports' | 'ebm'>('pnl');
   const [selectedPeriod, setSelectedPeriod] = useState<'today' | 'week' | 'month'>('month');
+
+  // EBM & MoMo Telemetry State
+  const [ebmStats, setEbmStats] = useState<any>(null);
+  const [ebmReceiptsList, setEbmReceiptsList] = useState<EbmFiscalReceipt[]>([]);
+  const [momoWallet, setMomoWallet] = useState<any>(null);
+
+  useEffect(() => {
+    if (activeTab === 'ebm') {
+      api.getEbmStats().then(setEbmStats).catch(() => {});
+      api.getEbmReceipts().then(setEbmReceiptsList).catch(() => {});
+      api.getMoMoWallet().then(setMomoWallet).catch(() => {});
+    }
+  }, [activeTab]);
 
   // Ledger filter
   const [ledgerTypeFilter, setLedgerTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
@@ -225,6 +242,16 @@ export const AccountantWorkspace: React.FC<AccountantWorkspaceProps> = ({
           >
             <TrendingUp className="w-4 h-4 text-blue-700" />
             <span>3. Purchase vs Selling Margins ({products.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ebm')}
+            className={`px-4 py-2.5 rounded-t-xl text-xs font-bold transition-all border-t border-x flex items-center gap-2 cursor-pointer ${
+              activeTab === 'ebm' ? 'bg-white text-teal-950 border-stone-300 shadow-2xs' : 'text-stone-500 hover:text-stone-800 border-transparent'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>4. RRA EBM v2 & MoMo Settlements</span>
           </button>
         </div>
 
@@ -621,8 +648,186 @@ export const AccountantWorkspace: React.FC<AccountantWorkspaceProps> = ({
             </div>
           )}
 
-        </div>
+          {/* TAB 4: RRA EBM v2 FISCAL TELEMETRY & MOMO SETTLEMENTS */}
+          {activeTab === 'ebm' && (
+            <div className="space-y-6">
+              
+              {/* Top Overview Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                
+                {/* RRA EBM Device Card */}
+                <div className="p-5 bg-stone-900 text-stone-100 rounded-2xl border border-stone-800 shadow-sm relative overflow-hidden">
+                  <div className="flex items-center justify-between pb-3 border-b border-stone-800">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                        <ShieldCheck className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-white uppercase tracking-wider">RRA EBM v2 Status</h4>
+                        <p className="text-[10px] text-stone-400">Online Sales Data Controller (V-SDC)</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      CONNECTED
+                    </span>
+                  </div>
 
+                  <div className="mt-3.5 space-y-1.5 text-xs font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-stone-400">SDC ID:</span>
+                      <span className="font-bold text-white">{ebmStats?.sdcId || 'SDC00100492'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-stone-400">MRC Code:</span>
+                      <span className="font-bold text-white">{ebmStats?.mrc || 'FGG-KGL-01'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-stone-400">Taxpayer TIN:</span>
+                      <span className="font-bold text-emerald-400">{ebmStats?.taxPayerTin || '108420199'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-stone-400">Receipt Counter:</span>
+                      <span className="font-bold text-amber-400">#{ebmStats?.currentReceiptCounter || '19482'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* MTN MoMo Merchant Wallet */}
+                <div className="p-5 bg-amber-50 rounded-2xl border border-amber-200 shadow-sm">
+                  <div className="flex items-center justify-between pb-3 border-b border-amber-200">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-amber-400 text-stone-950 font-black flex items-center justify-center text-xs shadow-xs">
+                        MoMo
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider">MoMo Pay Collections</h4>
+                        <p className="text-[10px] text-amber-800">Merchant Code: {momoWallet?.merchantCode || '908411'}</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      SETTLED
+                    </span>
+                  </div>
+
+                  <div className="mt-3.5 space-y-1.5 text-xs font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-stone-600">Available Wallet:</span>
+                      <span className="font-extrabold text-stone-950 text-sm">
+                        {(momoWallet?.availableBalance || 2450800).toLocaleString()} RWF
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-stone-500">Account Name:</span>
+                      <span className="font-semibold text-stone-800">FOFO GREEN RWANDA LTD</span>
+                    </div>
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-stone-500">Push Status:</span>
+                      <span className="font-semibold text-emerald-700">Open API Active (Instant)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Rwanda VAT Summary Card */}
+                <div className="p-5 bg-teal-50 rounded-2xl border border-teal-200 shadow-sm">
+                  <div className="flex items-center justify-between pb-3 border-b border-teal-200">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-teal-700 text-white flex items-center justify-center">
+                        <Scale className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-teal-950 uppercase tracking-wider">Rwanda VAT Classification</h4>
+                        <p className="text-[10px] text-teal-700">Law No 016/2024 Compliance</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-full bg-teal-200 text-teal-900">
+                      RRA AUDITED
+                    </span>
+                  </div>
+
+                  <div className="mt-3.5 space-y-1.5 text-xs font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-teal-800">Code A (0% Exempt Fresh Produce):</span>
+                      <span className="font-bold text-teal-950">{(ebmStats?.totalExemptSalesRWF || 13000).toLocaleString()} FRW</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-teal-800">Code B (18% Standard VAT):</span>
+                      <span className="font-bold text-teal-950">{(ebmStats?.totalStandardVatSalesRWF || 1500).toLocaleString()} FRW</span>
+                    </div>
+                    <div className="flex justify-between pt-1 border-t border-teal-200 text-sm">
+                      <span className="text-teal-900 font-bold">Total VAT Due to RRA:</span>
+                      <span className="font-black text-emerald-800">{(ebmStats?.totalTaxCollectedRWF || 270).toLocaleString()} FRW</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* RRA EBM Invoicing Audit Table */}
+              <div className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-2xs">
+                <div className="bg-stone-50 px-4 py-3 border-b border-stone-200 flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider">
+                      Official RRA EBM v2 Fiscal Invoices Issued
+                    </h4>
+                    <p className="text-[11px] text-stone-500">
+                      Real-time digital tax invoice log synchronized with Rwanda Revenue Authority
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-stone-600 font-mono">
+                    {ebmReceiptsList.length} Invoices Recorded
+                  </span>
+                </div>
+
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-stone-50/50 text-stone-500 uppercase text-[10px] font-bold border-b border-stone-200 font-mono">
+                    <tr>
+                      <th className="py-2.5 px-4">Receipt Number</th>
+                      <th className="py-2.5 px-3">Date / Timestamp</th>
+                      <th className="py-2.5 px-3">Buyer TIN / Name</th>
+                      <th className="py-2.5 px-3">Code A (0% Exempt)</th>
+                      <th className="py-2.5 px-3">Code B (18% VAT)</th>
+                      <th className="py-2.5 px-3">Total Amount</th>
+                      <th className="py-2.5 px-3">Internal Data Hash</th>
+                      <th className="py-2.5 px-4 text-right">RRA Verification</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100 font-mono text-[11px]">
+                    {ebmReceiptsList.map((r, idx) => (
+                      <tr key={idx} className="hover:bg-stone-50/80">
+                        <td className="py-2.5 px-4 font-bold text-stone-900">{r.fiscalReceiptNumber}</td>
+                        <td className="py-2.5 px-3 text-stone-500">{new Date(r.issuedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                        <td className="py-2.5 px-3 text-stone-700">
+                          <div>{r.buyerName}</div>
+                          <div className="text-[9px] text-stone-400">TIN: {r.buyerTin}</div>
+                        </td>
+                        <td className="py-2.5 px-3 text-emerald-800 font-bold">{r.taxSummary.taxableAmountA.toLocaleString()} FRW</td>
+                        <td className="py-2.5 px-3 text-stone-700">
+                          {r.taxSummary.taxableAmountB.toLocaleString()} FRW 
+                          <span className="text-stone-400 text-[10px]"> (VAT: {r.taxSummary.taxAmountB} FRW)</span>
+                        </td>
+                        <td className="py-2.5 px-3 font-extrabold text-stone-950">{r.taxSummary.grandTotal.toLocaleString()} FRW</td>
+                        <td className="py-2.5 px-3 text-amber-700 font-bold">{r.internalData}</td>
+                        <td className="py-2.5 px-4 text-right">
+                          <a
+                            href={r.rraQrCodeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[10px] text-teal-800 bg-teal-50 hover:bg-teal-100 px-2.5 py-1 rounded-lg border border-teal-200 transition-colors font-sans font-bold"
+                          >
+                            <QrCode className="w-3 h-3 text-teal-700" />
+                            <span>Verify RRA</span>
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+            </div>
+          )}
+
+        </div>
       </div>
     </div>
   );

@@ -299,5 +299,101 @@ export const api = {
   // Download complete project ZIP folder
   downloadZipPackage() {
     window.location.href = '/api/system/download-zip';
+  },
+
+  // --- MTN MOMO OPEN API CLIENT METHODS ---
+  async initiateMoMoPayment(payload: {
+    amount: number;
+    payerPhone: string;
+    externalId: string;
+    customerName?: string;
+    payerMessage?: string;
+  }) {
+    const res = await fetch('/api/momo/requesttopay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to dispatch MTN MoMo payment push');
+    }
+    return await res.json();
+  },
+
+  async getMoMoStatus(referenceId: string) {
+    const res = await fetch(`/api/momo/requesttopay/${referenceId}`);
+    if (!res.ok) throw new Error('Failed to retrieve MoMo transaction status');
+    return await res.json();
+  },
+
+  async simulateMoMoApproval(referenceId: string) {
+    const res = await fetch(`/api/momo/simulate-approval/${referenceId}`, {
+      method: 'POST'
+    });
+    return await res.json();
+  },
+
+  async simulateMoMoRejection(referenceId: string, reason?: string) {
+    const res = await fetch(`/api/momo/simulate-rejection/${referenceId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    return await res.json();
+  },
+
+  async getMoMoTransactions() {
+    try {
+      const res = await fetch('/api/momo/transactions');
+      if (!res.ok) return [];
+      return await res.json();
+    } catch {
+      return [];
+    }
+  },
+
+  async getMoMoWallet() {
+    try {
+      const res = await fetch('/api/momo/wallet');
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  },
+
+  // --- RRA EBM v2 FISCAL ENGINE CLIENT METHODS ---
+  async generateEbmReceipt(payload: any) {
+    const res = await fetch('/api/ebm/generate-receipt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to generate RRA EBM v2 fiscal receipt');
+    }
+    return await res.json();
+  },
+
+  async getEbmReceipts() {
+    try {
+      const res = await fetch('/api/ebm/receipts');
+      if (!res.ok) return [];
+      return await res.json();
+    } catch {
+      return [];
+    }
+  },
+
+  async getEbmStats() {
+    try {
+      const res = await fetch('/api/ebm/stats');
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
   }
 };

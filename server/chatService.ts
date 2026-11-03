@@ -94,6 +94,15 @@ export const CHAT_CHANNELS: ChatChannel[] = [
     category: 'public'
   },
   {
+    id: 'staff-internal',
+    name: 'Staff Operations & Daily Directives',
+    nameRw: 'Ibiro by\'Abakozi & Gahunda z\'Isoko',
+    description: 'Internal operational coordination for Admin, Stock Manager, Cashier, Sales Attendant & Accountant. Shift handovers, price approvals & daily store directives.',
+    icon: 'Building2',
+    category: 'staff',
+    badge: 'Staff Only'
+  },
+  {
     id: 'staff-support',
     name: 'Customer Care & Floor Staff',
     nameRw: 'Ubufasha n\'Abakozi bacu',
@@ -233,6 +242,84 @@ const INITIAL_SEED_MESSAGES: ServerChatMessage[] = [
     timestamp: new Date(Date.now() - 3600000 * 0.8).toISOString(),
     timeFormatted: '45 mins ago',
     reactions: { '💳': ['usr-admin', 'usr-customer-2'] }
+  },
+  {
+    id: 'msg-staff-admin-directive-1',
+    channelId: 'staff-internal',
+    senderId: 'usr-admin',
+    senderName: 'Florentine Mushimiyimana',
+    senderRole: 'admin',
+    content: '👑 STAFF DIRECTIVE: Good morning team! Today we have 50kg of premium Bugesera Hass Avocados arriving. Eric (Stock Manager), please log the incoming batch in the Stock Workspace. Chantal (Cashier), ensure the MTN MoMo test QR is configured. Kevin (Sales), guide customers to the seasonal fruit displays. Aimee (Accountant), run the mid-day P&L check. Let me know your updates here!',
+    timestamp: new Date(Date.now() - 3600000 * 0.6).toISOString(),
+    timeFormatted: '35 mins ago',
+    reactions: { '👍': ['usr-stock', 'usr-cashier', 'usr-sales'], '🚀': ['usr-accountant'] }
+  },
+  {
+    id: 'msg-staff-stock-reply-1',
+    channelId: 'staff-internal',
+    senderId: 'usr-stock',
+    senderName: 'Eric Mugisha',
+    senderRole: 'stock_manager',
+    content: 'Noted Admin Florentine! Batch #STK-882 is currently being inspected in receiving bay 2. Quality grade is pristine. Recording in the system now.',
+    timestamp: new Date(Date.now() - 3600000 * 0.4).toISOString(),
+    timeFormatted: '25 mins ago',
+    reactions: { '👏': ['usr-admin'] }
+  },
+  {
+    id: 'msg-dm-admin-stock-1',
+    channelId: 'dm:usr-admin-usr-stock',
+    senderId: 'usr-admin',
+    senderName: 'Florentine Mushimiyimana',
+    senderRole: 'admin',
+    recipientId: 'usr-stock',
+    recipientName: 'Eric Mugisha',
+    isDirectMessage: true,
+    content: 'Hi Eric, please double check the damaged fruit shelf in section C and record any discarded items before 2:00 PM.',
+    timestamp: new Date(Date.now() - 3600000 * 0.5).toISOString(),
+    timeFormatted: '30 mins ago',
+    reactions: { '📦': ['usr-stock'] }
+  },
+  {
+    id: 'msg-dm-admin-cashier-1',
+    channelId: 'dm:usr-admin-usr-cashier',
+    senderId: 'usr-admin',
+    senderName: 'Florentine Mushimiyimana',
+    senderRole: 'admin',
+    recipientId: 'usr-cashier',
+    recipientName: 'Chantal Uwera',
+    isDirectMessage: true,
+    content: 'Hello Chantal, we are enabling automatic RRA EBM v2 receipts for all cashier transactions. Let me know if you encounter any printer or USSD timeout issues.',
+    timestamp: new Date(Date.now() - 3600000 * 0.45).toISOString(),
+    timeFormatted: '27 mins ago',
+    reactions: { '💳': ['usr-cashier'] }
+  },
+  {
+    id: 'msg-dm-admin-accountant-1',
+    channelId: 'dm:usr-accountant-usr-admin',
+    senderId: 'usr-admin',
+    senderName: 'Florentine Mushimiyimana',
+    senderRole: 'admin',
+    recipientId: 'usr-accountant',
+    recipientName: 'Aimee Mukamana',
+    isDirectMessage: true,
+    content: 'Aimee, please export this week\'s net profit and gross margin reports so we can review them at the management meeting.',
+    timestamp: new Date(Date.now() - 3600000 * 0.35).toISOString(),
+    timeFormatted: '20 mins ago',
+    reactions: { '📊': ['usr-accountant'] }
+  },
+  {
+    id: 'msg-dm-admin-sales-1',
+    channelId: 'dm:usr-admin-usr-sales',
+    senderId: 'usr-admin',
+    senderName: 'Florentine Mushimiyimana',
+    senderRole: 'admin',
+    recipientId: 'usr-sales',
+    recipientName: 'Kevin Niyonzima',
+    isDirectMessage: true,
+    content: 'Kevin, remember to assist customers with the digital basket builder on the kiosk if they want help choosing between avocados and pineapples.',
+    timestamp: new Date(Date.now() - 3600000 * 0.3).toISOString(),
+    timeFormatted: '18 mins ago',
+    reactions: { '🤝': ['usr-sales'] }
   }
 ];
 
@@ -251,7 +338,13 @@ class ChatService {
         const raw = fs.readFileSync(CHAT_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.messages = parsed;
+          // Merge missing initial seed messages (e.g. newly introduced staff channels & DMs)
+          const existingIds = new Set(parsed.map((m: any) => m.id));
+          const missingSeeds = INITIAL_SEED_MESSAGES.filter(s => !existingIds.has(s.id));
+          this.messages = [...parsed, ...missingSeeds];
+          if (missingSeeds.length > 0) {
+            this.saveMessages();
+          }
           return;
         }
       }

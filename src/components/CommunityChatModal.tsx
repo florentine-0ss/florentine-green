@@ -13,6 +13,7 @@ import {
   User, Product, ChatMessage, ChatChannel, ChatOnlineUser, 
   ChatAttachment, ChatVoiceNote, ChatCallSession, UserRole 
 } from '../types';
+import { useRealtimeCommunity } from '../context/RealtimeCommunityContext';
 
 interface CommunityChatModalProps {
   isOpen: boolean;
@@ -40,6 +41,13 @@ const PRESET_PROMPTS: Record<string, string[]> = {
     'My Solar Moto delivery arrived in Niboye in under 20 minutes! 🛵⚡',
     'Do you deliver to Rebero and Gahanga in the afternoon?',
     'Cold-chain packaging with ice packs kept the tilapia perfectly chilled.'
+  ],
+  'staff-internal': [
+    'Confirmed Admin Florentine, updating inventory records now! 🚀',
+    'Morning cash float and MTN MoMo register verified. 💳',
+    'Low stock alert noted: reordering Bugesera avocados. 🥑',
+    'Kiosk sales assistant stationed and assisting walk-in customers. 🤝',
+    'P&L statement reconciled with RRA tax invoices. 📊'
   ],
   'staff-support': [
     'Need help with an MTN MoMo payment receipt confirmation.',
@@ -74,6 +82,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   availableProducts,
   joinedUsers
 }) => {
+  const { activeChatTarget, clearActiveChatTarget, onlineUsers: globalOnlineUsers } = useRealtimeCommunity();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string>('general');
   const [directRecipient, setDirectRecipient] = useState<User | null>(null);
@@ -129,6 +138,59 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       scrollToBottom();
     }
   }, [messages, activeChannelId, directRecipient, isOpen, activeCall]);
+
+  // Handle immediate response targeting from live presence notification toast
+  useEffect(() => {
+    if (isOpen && activeChatTarget) {
+      if (activeChatTarget.channelId) {
+        setActiveChannelId(activeChatTarget.channelId);
+        setDirectRecipient(null);
+      }
+      if (activeChatTarget.user) {
+        const found = joinedUsers.find(u => String(u.id) === activeChatTarget.user?.userId);
+        if (found) {
+          setDirectRecipient(found);
+        }
+      }
+      if (activeChatTarget.prefillReply) {
+        setInputText(activeChatTarget.prefillReply);
+      }
+      setTimeout(() => {
+        const inputElem = document.querySelector('textarea[placeholder*="Type a message"], input[placeholder*="Type a message"]') as HTMLInputElement | HTMLTextAreaElement;
+        if (inputElem) {
+          inputElem.focus();
+          inputElem.setSelectionRange(inputElem.value.length, inputElem.value.length);
+        }
+      }, 150);
+      clearActiveChatTarget();
+    }
+  }, [isOpen, activeChatTarget, joinedUsers, clearActiveChatTarget]);
+
+  // If a staff member opens the chat without a specific target, auto-direct them to any pending Admin DM or staff-internal channel
+  useEffect(() => {
+    if (isOpen && currentUser && currentUser.role !== 'customer' && !activeChatTarget) {
+      if (currentUser.role !== 'admin') {
+        const adminDmChannel = getDmChannelId(currentUser.id, 'usr-admin');
+        const hasAdminDm = messages.some(m => m.channelId === adminDmChannel && m.senderId === 'usr-admin');
+        const adminUser = joinedUsers.find(u => u.id === 'usr-admin' || u.role === 'admin');
+
+        if (hasAdminDm && adminUser && activeChannelId === 'general' && !directRecipient) {
+          setDirectRecipient(adminUser);
+          return;
+        }
+      }
+      if (activeChannelId === 'general' && !directRecipient) {
+        setActiveChannelId('staff-internal');
+      }
+    }
+  }, [isOpen, currentUser, messages, joinedUsers]);
+
+  // Keep online users synced with global presence
+  useEffect(() => {
+    if (globalOnlineUsers && globalOnlineUsers.length > 0) {
+      setOnlineUsers(globalOnlineUsers);
+    }
+  }, [globalOnlineUsers]);
 
   // Voice recording timer
   useEffect(() => {
@@ -620,6 +682,67 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     return onlineUsers.some(u => u.userId === userId);
   };
 
+  const getStaffQuickReplies = () => {
+    switch (currentUser?.role) {
+      case 'stock_manager':
+        return [
+          'Confirmed Admin, logging stock batch #STK-882 now! 🚀',
+          'Checked damaged fruit shelf in section C and recorded in workspace. 👍',
+          '50kg Musanze Hass Avocados quality inspected: Grade A.',
+          'Physical stock reconciled with current inventory counts.'
+        ];
+      case 'cashier':
+        return [
+          'Cash drawer float of 50,000 FRW verified, register active. 💳',
+          'MTN MoMo push notifications tested and operational. ⚡',
+          'RRA EBM v2 fiscal QR code receipt printing tested with customer.',
+          'Morning transaction ledger balanced with POS system.'
+        ];
+      case 'sales_attendant':
+        return [
+          'Kiosk customer assisted with customized organic fruit basket. 🤝',
+          'Bugesera mangoes and Hass avocados displayed in front. 🥭',
+          'Assisted shopper order confirmed and handed off to Cashier.',
+          'Assisting walk-in customers with seasonal recipe kits.'
+        ];
+      case 'accountant':
+        return [
+          'Mid-day P&L and gross margin report generated for review. 📊',
+          'RRA EBM v2 tax invoices fully synchronized with server. 🧾',
+          'Expense vouchers and supplier payments audited in ledger.',
+          'Weekly financial summary ready for management review.'
+        ];
+      default:
+        return [
+          'Understood Admin Florentine, updating status now! 🚀',
+          'All operations running normally in my department. 👍',
+          'Sending you the verified report right away. 📋',
+          'Task completed and recorded in workspace center.'
+        ];
+    }
+  };
+
+  const isStaffChatActive = Boolean(
+    currentUser && (
+      activeChannelId === 'staff-internal' ||
+      activeChannelId === 'staff-support' ||
+      (directRecipient && (directRecipient.role !== 'customer' || currentUser.role !== 'customer'))
+    )
+  );
+
+  const getUnreadCountFromMember = (otherUserId: string) => {
+    if (!currentUser) return 0;
+    const dmChannel = getDmChannelId(currentUser.id, otherUserId);
+    return messages.filter(m => m.channelId === dmChannel && m.senderId === otherUserId).length;
+  };
+
+  const getLastMessageWithMember = (otherUserId: string) => {
+    if (!currentUser) return null;
+    const dmChannel = getDmChannelId(currentUser.id, otherUserId);
+    const dmMsgs = messages.filter(m => m.channelId === dmChannel);
+    return dmMsgs.length > 0 ? dmMsgs[dmMsgs.length - 1] : null;
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-stone-900/75 backdrop-blur-md animate-in fade-in duration-200">
       
@@ -881,85 +1004,208 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
             {/* TAB CONTENT 1: CHANNELS */}
             {sidebarTab === 'channels' && (
-              <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-stone-500">
-                  Public Lounges
-                </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-2.5">
+                
+                {/* 1. INTERNAL STAFF OPERATIONS HUB */}
+                <div>
+                  <div className="px-2 py-1.5 text-[10px] font-black uppercase tracking-wider text-amber-900 bg-amber-50/90 rounded-xl flex items-center justify-between border border-amber-200/80 mb-1">
+                    <span className="flex items-center gap-1.5">
+                      <span>🏢</span>
+                      <span>Staff Operations Hub</span>
+                    </span>
+                    <span className="text-[8px] bg-amber-200 text-amber-950 px-1.5 py-0.2 rounded font-black uppercase">
+                      5 Roles
+                    </span>
+                  </div>
 
-                {channels.map((chan) => {
-                  const isActive = !directRecipient && activeChannelId === chan.id;
-                  return (
-                    <button
-                      key={chan.id}
-                      onClick={() => handleSelectChannel(chan.id)}
-                      className={`w-full text-left p-2.5 rounded-2xl transition-all cursor-pointer flex items-start gap-2.5 ${
-                        isActive
-                          ? 'bg-emerald-100/90 border border-emerald-300 text-emerald-950 font-bold shadow-2xs'
-                          : 'hover:bg-white text-stone-700 hover:text-stone-900 border border-transparent'
-                      }`}
-                    >
-                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs shrink-0 mt-0.5 ${
-                        isActive ? 'bg-emerald-800 text-white' : 'bg-stone-200 text-stone-700'
-                      }`}>
-                        <Hash className="w-4 h-4" />
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-bold truncate leading-tight">{chan.name}</p>
-                          {chan.badge && (
-                            <span className="text-[8px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded-full font-black uppercase">
-                              {chan.badge}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[10px] text-stone-500 line-clamp-1 mt-0.5">
-                          {chan.description}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-
-                {/* Direct Messages Quick Section */}
-                <div className="pt-3 px-2 text-[10px] font-black uppercase tracking-wider text-stone-500 flex items-center justify-between">
-                  <span>Direct Messages</span>
-                  <Lock className="w-3 h-3 text-stone-400" />
-                </div>
-
-                <div className="space-y-1">
-                  {joinedUsers.slice(0, 5).map((user) => {
-                    const isSelected = directRecipient?.id === user.id;
-                    const online = isUserOnline(user.id);
-                    return (
-                      <button
-                        key={user.id}
-                        onClick={() => handleSelectMemberDM(user)}
-                        className={`w-full text-left px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
-                          isSelected
-                            ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold shadow-2xs'
-                            : 'hover:bg-white text-stone-700 border border-transparent'
-                        }`}
-                      >
-                        <div className="relative shrink-0">
-                          <div className="w-6 h-6 rounded-lg bg-stone-800 text-white text-[11px] font-bold flex items-center justify-center">
-                            {user.name.charAt(0)}
+                  <div className="space-y-1">
+                    {channels.filter(c => c.category === 'staff' || c.id === 'staff-internal' || c.id === 'staff-support').map((chan) => {
+                      const isActive = !directRecipient && activeChannelId === chan.id;
+                      const isDirectiveChan = chan.id === 'staff-internal';
+                      return (
+                        <button
+                          key={chan.id}
+                          onClick={() => handleSelectChannel(chan.id)}
+                          className={`w-full text-left p-2.5 rounded-2xl transition-all cursor-pointer flex items-start gap-2.5 ${
+                            isActive
+                              ? 'bg-amber-100/90 border border-amber-400 text-amber-950 font-bold shadow-2xs'
+                              : 'hover:bg-amber-50/60 text-stone-700 hover:text-stone-900 border border-stone-200/60 bg-white'
+                          }`}
+                        >
+                          <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs shrink-0 mt-0.5 ${
+                            isActive ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-900'
+                          }`}>
+                            {isDirectiveChan ? '👑' : <ShieldCheck className="w-4 h-4" />}
                           </div>
-                          <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white ${
-                            online ? 'bg-emerald-500' : 'bg-stone-300'
-                          }`} />
-                        </div>
 
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold truncate leading-none">{user.name}</p>
-                          <span className="text-[9px] text-stone-500 leading-none capitalize">
-                            {user.role.replace(/_/g, ' ')}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-bold truncate leading-tight">{chan.name}</p>
+                              {chan.badge && (
+                                <span className="text-[8px] px-1.5 py-0.2 bg-amber-200 text-amber-900 rounded-full font-black uppercase">
+                                  {chan.badge}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-stone-500 line-clamp-1 mt-0.5">
+                              {chan.description}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+
+                {/* 2. PUBLIC COMMUNITY LOUNGES */}
+                <div>
+                  <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-stone-500 mb-1">
+                    Public Community Lounges
+                  </div>
+
+                  <div className="space-y-1">
+                    {channels.filter(c => c.category !== 'staff' && c.id !== 'staff-internal' && c.id !== 'staff-support').map((chan) => {
+                      const isActive = !directRecipient && activeChannelId === chan.id;
+                      return (
+                        <button
+                          key={chan.id}
+                          onClick={() => handleSelectChannel(chan.id)}
+                          className={`w-full text-left p-2.5 rounded-2xl transition-all cursor-pointer flex items-start gap-2.5 ${
+                            isActive
+                              ? 'bg-emerald-100/90 border border-emerald-300 text-emerald-950 font-bold shadow-2xs'
+                              : 'hover:bg-white text-stone-700 hover:text-stone-900 border border-transparent'
+                          }`}
+                        >
+                          <div className={`w-7 h-7 rounded-xl flex items-center justify-center text-xs shrink-0 mt-0.5 ${
+                            isActive ? 'bg-emerald-800 text-white' : 'bg-stone-200 text-stone-700'
+                          }`}>
+                            <Hash className="w-4 h-4" />
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-bold truncate leading-tight">{chan.name}</p>
+                              {chan.badge && (
+                                <span className="text-[8px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded-full font-black uppercase">
+                                  {chan.badge}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-stone-500 line-clamp-1 mt-0.5">
+                              {chan.description}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. STAFF TEAM DIRECT MESSAGES */}
+                <div>
+                  <div className="pt-2 px-2 text-[10px] font-black uppercase tracking-wider text-amber-900 flex items-center justify-between mb-1">
+                    <span className="flex items-center gap-1.5">
+                      <span>💬</span>
+                      <span>Staff Team Direct Messages</span>
+                    </span>
+                    <Lock className="w-3 h-3 text-stone-400" />
+                  </div>
+
+                  <div className="space-y-1">
+                    {joinedUsers.filter(u => u.role !== 'customer').map((user) => {
+                      const isSelected = directRecipient?.id === user.id;
+                      const isSelf = currentUser?.id === user.id;
+                      const online = isUserOnline(user.id);
+                      const unread = getUnreadCountFromMember(user.id);
+                      const lastMsg = getLastMessageWithMember(user.id);
+                      const badge = getRoleBadge(user.role);
+
+                      return (
+                        <button
+                          key={user.id}
+                          onClick={() => handleSelectMemberDM(user)}
+                          className={`w-full text-left px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
+                            isSelected
+                              ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold shadow-2xs'
+                              : 'hover:bg-white text-stone-700 border border-transparent'
+                          }`}
+                        >
+                          <div className="relative shrink-0">
+                            <div className="w-7 h-7 rounded-lg bg-stone-800 text-white text-[11px] font-bold flex items-center justify-center">
+                              {user.name.charAt(0)}
+                            </div>
+                            <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white ${
+                              online ? 'bg-emerald-500' : 'bg-stone-300'
+                            }`} />
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <p className="text-xs font-semibold truncate leading-none">
+                                {user.name} {isSelf && <span className="text-[9px] text-stone-400 font-normal">(You)</span>}
+                              </p>
+                              {unread > 0 && !isSelf && (
+                                <span className="text-[8px] bg-amber-500 text-stone-950 font-black px-1.5 py-0.2 rounded-full shrink-0 shadow-xs">
+                                  {user.role === 'admin' ? '👑 Directive' : `${unread} new`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className={`text-[8px] px-1 py-0.1 rounded font-bold border ${badge.bg}`}>
+                                {badge.label}
+                              </span>
+                              {lastMsg && (
+                                <span className="text-[9px] text-stone-400 truncate italic">
+                                  {lastMsg.content.slice(0, 25)}...
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 4. SHOPPER DIRECT MESSAGES */}
+                <div>
+                  <div className="pt-2 px-2 text-[10px] font-black uppercase tracking-wider text-stone-500 mb-1">
+                    Shopper Direct Messages
+                  </div>
+
+                  <div className="space-y-1">
+                    {joinedUsers.filter(u => u.role === 'customer').slice(0, 3).map((user) => {
+                      const isSelected = directRecipient?.id === user.id;
+                      const online = isUserOnline(user.id);
+                      return (
+                        <button
+                          key={user.id}
+                          onClick={() => handleSelectMemberDM(user)}
+                          className={`w-full text-left px-2.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
+                            isSelected
+                              ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold shadow-2xs'
+                              : 'hover:bg-white text-stone-700 border border-transparent'
+                          }`}
+                        >
+                          <div className="relative shrink-0">
+                            <div className="w-6 h-6 rounded-lg bg-stone-700 text-white text-[10px] font-bold flex items-center justify-center">
+                              {user.name.charAt(0)}
+                            </div>
+                            <span className={`absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full border border-white ${
+                              online ? 'bg-emerald-500' : 'bg-stone-300'
+                            }`} />
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate leading-none">{user.name}</p>
+                            <span className="text-[9px] text-stone-400 leading-none">Customer</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
               </div>
             )}
 
@@ -1189,11 +1435,16 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                       <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} max-w-[85%]`}>
                         
                         {/* Sender info & time */}
-                        <div className="flex items-center gap-1.5 mb-1 px-1">
+                        <div className="flex items-center gap-1.5 mb-1 px-1 flex-wrap">
                           <span className="font-extrabold text-xs text-stone-900">{msg.senderName}</span>
                           <span className={`text-[8px] font-extrabold px-1.5 py-0.2 rounded-md border ${senderBadge.bg}`}>
                             {senderBadge.label}
                           </span>
+                          {msg.senderRole === 'admin' && (
+                            <span className="text-[8px] font-black px-1.5 py-0.2 rounded-md bg-amber-400 text-stone-950 uppercase border border-amber-300 shadow-2xs">
+                              👑 Directive
+                            </span>
+                          )}
                           <span className="text-[10px] text-stone-400">{msg.timeFormatted}</span>
                         </div>
 

@@ -7,6 +7,8 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { db } from './server/db.ts';
 import { chatService } from './server/chatService.ts';
+import { momoService } from './server/momoService.ts';
+import { ebmService } from './server/ebmService.ts';
 import { 
   seedDatabaseIfEmpty, 
   getProductsFromDb, 
@@ -506,9 +508,27 @@ async function startServer() {
   });
 
   api.post('/chat/messages', (req: Request, res: Response) => {
-    const { channelId, senderId, senderName, senderRole, senderAvatar, content, replyTo, productTag, isDirectMessage, recipientId, recipientName } = req.body;
-    if (!content || !senderName || !senderId) {
-      return res.status(400).json({ error: 'Missing content or sender info' });
+    const { 
+      channelId, 
+      senderId, 
+      senderName, 
+      senderRole, 
+      senderAvatar, 
+      content, 
+      replyTo, 
+      productTag, 
+      attachments,
+      voiceNote,
+      callEvent,
+      isDirectMessage, 
+      recipientId, 
+      recipientName 
+    } = req.body;
+    if (!content && !attachments && !voiceNote && !callEvent) {
+      return res.status(400).json({ error: 'Missing content or attachment' });
+    }
+    if (!senderName || !senderId) {
+      return res.status(400).json({ error: 'Missing sender info' });
     }
 
     const message = chatService.addMessage({
@@ -517,10 +537,13 @@ async function startServer() {
       senderName,
       senderRole: senderRole || 'customer',
       senderAvatar,
-      content,
+      content: content || '',
       reactions: {},
       replyTo,
       productTag,
+      attachments,
+      voiceNote,
+      callEvent,
       isDirectMessage,
       recipientId,
       recipientName
@@ -543,6 +566,113 @@ async function startServer() {
 
   api.get('/chat/online-users', (req: Request, res: Response) => {
     res.json(chatService.getOnlineUsers());
+  });
+
+  // --- METHOD 1: MTN MOMO PAY OPEN API (RWANDA COLLECTIONS) ---
+  // 1. Initiate Request to Pay (Sends USSD push prompt to customer phone)
+  api.post('/momo/requesttopay', (req: Request, res: Response) => {
+    const { amount, payerPhone, externalId, customerName, payerMessage } = req.body;
+    if (!amount || !payerPhone) {
+      return res.status(400).json({ error: 'amount and payerPhone (e.g. 078...) are required' });
+    }
+
+    const tx = momoService.initiateRequestToPay({
+      amount: Number(amount),
+      currency: 'RWF',
+      externalId: externalId || `ORDER-${Date.now().toString().slice(-6)}`,
+      payerPhone,
+      customerName,
+      payerMessage
+    });
+
+    res.status(202).json({
+      message: 'MoMo push notification dispatched to Rwandan subscriber',
+      referenceId: tx.referenceId,
+      status: tx.status,
+      amount: tx.amount,
+      currency: tx.currency,
+      payerPhone: tx.payerPhone,
+      instructions: 'Customer must check their phone and enter PIN to authorize the transaction'
+    });
+  });
+
+  // 2. Poll Request to Pay status (GET /collection/v1_0/requesttopay/{referenceId})
+  api.get('/momo/requesttopay/:referenceId', (req: Request, res: Response) => {
+    const tx = momoService.getTransactionStatus(req.params.referenceId);
+    if (!tx) {
+      return res.status(404).json({ error: 'MoMo transaction not found' });
+    }
+    res.json(tx);
+  });
+
+  // 3. Simulate customer entering correct PIN on mobile phone (Sandbox / Interactive Testing)
+  api.post('/momo/simulate-approval/:referenceId', (req: Request, res: Response) => {
+    const tx = momoService.approveTransaction(req.params.referenceId);
+    if (!tx) {
+      return res.status(404).json({ error: 'MoMo transaction not found' });
+    }
+    res.json({
+      message: 'Payment approved successfully by customer',
+      transaction: tx
+    });
+  });
+
+  // 4. Simulate customer rejecting prompt / wrong PIN
+  api.post('/momo/simulate-rejection/:referenceId', (req: Request, res: Response) => {
+    const { reason } = req.body;
+    const tx = momoService.rejectTransaction(req.params.referenceId, reason);
+    if (!tx) {
+      return res.status(404).json({ error: 'MoMo transaction not found' });
+    }
+    res.json({
+      message: 'Payment rejected',
+      transaction: tx
+    });
+  });
+
+  // 5. MoMo Transaction log
+  api.get('/momo/transactions', (req: Request, res: Response) => {
+    res.json(momoService.getRecentTransactions());
+  });
+
+  // 6. MoMo Merchant Wallet balance
+  api.get('/momo/wallet', (req: Request, res: Response) => {
+    res.json(momoService.getWalletBalance());
+  });
+
+  // --- OPTION 2: RRA EBM v2 FISCAL INVOICING SYSTEM ---
+  // 1. Generate RRA EBM v2 Fiscal Receipt with SDC ID & QR Code
+  api.post('/ebm/generate-receipt', (req: Request, res: Response) => {
+    const { orderId, customerName, customerPhone, customerTin, items, subtotal, discount, deliveryFee, paymentMethod, paymentReference, cashierName } = req.body;
+    if (!orderId || !items || !items.length) {
+      return res.status(400).json({ error: 'orderId and items array are required' });
+    }
+
+    const receipt = ebmService.generateFiscalReceipt({
+      orderId,
+      customerName: customerName || 'Retail Customer',
+      customerPhone,
+      customerTin,
+      items,
+      subtotal: Number(subtotal) || 0,
+      discount: Number(discount) || 0,
+      deliveryFee: Number(deliveryFee) || 0,
+      paymentMethod: paymentMethod || 'MTN MoMo Pay',
+      paymentReference,
+      cashierName
+    });
+
+    res.status(201).json(receipt);
+  });
+
+  // 2. Get list of fiscal receipts for Accountant & Admin
+  api.get('/ebm/receipts', (req: Request, res: Response) => {
+    res.json(ebmService.getReceipts());
+  });
+
+  // 3. Get RRA EBM telemetry and tax stats
+  api.get('/ebm/stats', (req: Request, res: Response) => {
+    res.json(ebmService.getFiscalStats());
   });
 
   // Multiple route aliases so any client or script can download immediately

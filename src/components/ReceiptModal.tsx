@@ -286,15 +286,40 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
               )}
             </div>
 
-            {/* QR Code Verification Footer */}
-            <div className="mt-4 pt-3 border-t border-stone-200 flex items-center justify-between">
-              <div className="text-left">
-                <p className="text-[10px] font-bold text-stone-800 uppercase tracking-wider">RRA / Farm Verified</p>
-                <p className="text-[9px] text-stone-400">Authentic Organic Produce • 100% Rwandan Farmers</p>
-                <p className="text-[9px] text-emerald-700 font-semibold mt-0.5">Murakoze cyane kubana natwe!</p>
+            {/* RRA EBM v2 Fiscal Verification Footer */}
+            <div className="mt-4 pt-3 border-t border-dashed border-stone-300 bg-stone-100/70 p-3 rounded-xl border">
+              <div className="flex items-center justify-between pb-2 border-b border-stone-200">
+                <div>
+                  <span className="text-[9px] uppercase tracking-wider font-extrabold text-stone-800 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                    RRA EBM v2 Fiscal Certified
+                  </span>
+                  <p className="text-[9px] text-stone-500 font-mono">SDC: SDC00100492 • MRC: FGG-KGL-01</p>
+                </div>
+                <span className="text-[9px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">
+                  ONLINE TRANSMITTED
+                </span>
               </div>
-              <div className="p-1.5 bg-white border border-stone-200 rounded-lg shadow-2xs">
-                <QrCode className="w-9 h-9 text-stone-800" />
+
+              <div className="grid grid-cols-2 gap-1.5 pt-2 text-[9px] font-mono text-stone-600">
+                <div>
+                  <span className="text-stone-400 block">TAX CODE A (0% EXEMPT):</span>
+                  <span className="font-bold text-stone-800">{receipt.total.toLocaleString()} FRW</span>
+                </div>
+                <div>
+                  <span className="text-stone-400 block">INTERNAL DATA HASH:</span>
+                  <span className="font-bold text-stone-800">4B82-E9A1-33CF-8921</span>
+                </div>
+              </div>
+
+              <div className="mt-2.5 pt-2 border-t border-stone-200 flex items-center justify-between">
+                <div className="text-left">
+                  <p className="text-[9px] text-stone-500">100% Rwandan Organic Produce • Pesticide-Free</p>
+                  <p className="text-[9px] text-emerald-700 font-bold">Murakoze cyane! Thank you for buying local!</p>
+                </div>
+                <div className="p-1 bg-white border border-stone-300 rounded shadow-2xs flex items-center gap-1">
+                  <QrCode className="w-7 h-7 text-stone-800" />
+                </div>
               </div>
             </div>
 
