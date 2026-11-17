@@ -4,9 +4,9 @@ import {
   Printer, ArrowLeft, ChevronRight, MapPin, Phone, User as UserIcon,
   RotateCcw, Sparkles, Navigation, QrCode, Lock, Check, Send, AlertCircle
 } from 'lucide-react';
-import { CartItem, Language, Order, PaymentMethod, EbmFiscalReceipt, DeliveryZoneSelection } from '../types';
+import { CartItem, CountryLocation, Language, Order, PaymentMethod, EbmFiscalReceipt, DeliveryZoneSelection } from '../types';
 import { TRANSLATIONS } from '../data/translations';
-import { RWANDA_LOCATIONS } from '../data/mockData';
+import { INITIAL_COUNTRY_LOCATIONS } from '../data/mockData';
 import { api } from '../services/api';
 
 interface CheckoutModalProps {
@@ -17,6 +17,7 @@ interface CheckoutModalProps {
   discountAmount: number;
   initialPaymentMethod: PaymentMethod;
   selectedLocation?: DeliveryZoneSelection;
+  locations?: CountryLocation[];
   onOrderComplete: (order: Order) => void;
   onReturnToCart?: () => void;
   onOpenOrderTracker?: (orderId: string) => void;
@@ -32,11 +33,13 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   discountAmount,
   initialPaymentMethod,
   selectedLocation,
+  locations,
   onOrderComplete,
   onReturnToCart,
   onOpenOrderTracker
 }) => {
   const t = TRANSLATIONS[currentLang].checkout;
+  const availableLocations = locations && locations.length > 0 ? locations : INITIAL_COUNTRY_LOCATIONS;
   const [step, setStep] = useState<CheckoutStep>('details');
   const [name, setName] = useState('');
   const [countryCode, setCountryCode] = useState('+250');
@@ -69,7 +72,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   if (!isOpen) return null;
 
-  const matchedZone = RWANDA_LOCATIONS.find((l) => l.district === district);
+  const matchedZone = availableLocations.find((l) => l.district === district);
   const zoneFee = matchedZone ? matchedZone.fee : (selectedLocation?.fee ?? 2000);
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const deliveryFee = subtotal >= 25000 || subtotal === 0 ? 0 : zoneFee;
@@ -405,9 +408,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     onChange={(e) => setDistrict(e.target.value)}
                     className="w-full text-xs sm:text-sm px-3.5 py-2.5 border border-stone-300 rounded-xl focus:outline-emerald-600 bg-white cursor-pointer"
                   >
-                    {RWANDA_LOCATIONS.map((loc) => (
-                      <option key={loc.district} value={loc.district}>
-                        {loc.district} ({loc.fee === 0 || subtotal >= 25000 ? 'Free Delivery' : `${loc.fee.toLocaleString()} FRW`})
+                    {availableLocations.map((loc) => (
+                      <option key={loc.id || loc.district} value={loc.district}>
+                        {loc.country && loc.country !== 'Rwanda' ? `${loc.district} · ${loc.country}` : loc.district} ({loc.fee === 0 || subtotal >= 25000 ? 'Free Delivery' : `${loc.fee.toLocaleString()} FRW`})
                       </option>
                     ))}
                   </select>

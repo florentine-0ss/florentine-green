@@ -21,7 +21,9 @@
       "🔥": [
         "usr-admin"
       ]
-    }
+    },
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "id": "msg-seed-2",
@@ -40,7 +42,9 @@
       "🔥": [
         "usr-customer-2"
       ]
-    }
+    },
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "id": "msg-seed-3",
@@ -64,7 +68,9 @@
       "price": 2200,
       "image": "https://images.unsplash.com/photo-1523049673857-eb18f1d7b578?auto=format&fit=crop&w=700&q=80",
       "spec": "1 kg (approx. 4-5 pcs)"
-    }
+    },
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "id": "msg-seed-4",
@@ -75,14 +81,18 @@
     "content": "Eric, are the avocados ready-to-eat today or do they need a couple of days to soften on the counter?",
     "timestamp": "2026-10-26T11:48:04.715Z",
     "timeFormatted": "2 hrs ago",
-    "reactions": {}
+    "reactions": {},
+    "messageType": "question",
+    "status": "answered",
+    "answeredBy": "Florentine Mushimiyimana",
+    "isDirectMessage": false
   },
   {
     "id": "msg-seed-5",
     "channelId": "fresh-harvest",
-    "senderId": "usr-sales",
-    "senderName": "Kevin Niyonzima",
-    "senderRole": "sales_attendant",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
     "content": "Hi Sarah! About half the batch is gently yielding and perfect for today's guacamole, while the rest can ripen over 2–3 days. You can specify \"Ripe for Today\" in your order notes!",
     "timestamp": "2026-10-26T12:00:04.715Z",
     "timeFormatted": "1 hr ago",
@@ -95,7 +105,12 @@
       "id": "msg-seed-4",
       "senderName": "Sarah Mitchell",
       "content": "Eric, are the avocados ready-to-eat today or do they need a couple of days..."
-    }
+    },
+    "messageType": "answer",
+    "isOfficialReply": true,
+    "status": "answered",
+    "answeredBy": "Florentine Mushimiyimana",
+    "isDirectMessage": false
   },
   {
     "id": "msg-seed-6",
@@ -114,7 +129,9 @@
       "👏": [
         "usr-customer-1"
       ]
-    }
+    },
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "id": "msg-seed-7",
@@ -130,7 +147,9 @@
         "usr-admin",
         "usr-customer-2"
       ]
-    }
+    },
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "channelId": "general",
@@ -141,7 +160,9 @@
     "reactions": {},
     "id": "msg-1793022491932-qpu0x",
     "timestamp": "2026-10-26T13:48:11.932Z",
-    "timeFormatted": "01:48 PM"
+    "timeFormatted": "01:48 PM",
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "channelId": "general",
@@ -156,7 +177,9 @@
     "id": "msg-1793622917662-79ezx",
     "timestamp": "2026-11-02T12:35:17.662Z",
     "timeFormatted": "12:35 PM",
-    "reactions": {}
+    "reactions": {},
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "channelId": "general",
@@ -172,7 +195,9 @@
     "id": "msg-1793622936211-w1jqd",
     "timestamp": "2026-11-02T12:35:36.211Z",
     "timeFormatted": "12:35 PM",
-    "reactions": {}
+    "reactions": {},
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "channelId": "general",
@@ -184,7 +209,8 @@
     "isDirectMessage": false,
     "id": "msg-1793622953805-kaklc",
     "timestamp": "2026-11-02T12:35:53.805Z",
-    "timeFormatted": "12:35 PM"
+    "timeFormatted": "12:35 PM",
+    "messageType": "message"
   },
   {
     "channelId": "general",
@@ -196,7 +222,8 @@
     "isDirectMessage": false,
     "id": "msg-1793626474669-b479p",
     "timestamp": "2026-11-02T13:34:34.669Z",
-    "timeFormatted": "01:34 PM"
+    "timeFormatted": "01:34 PM",
+    "messageType": "message"
   },
   {
     "channelId": "general",
@@ -208,7 +235,8 @@
     "isDirectMessage": false,
     "id": "msg-1793626777997-kys0j",
     "timestamp": "2026-11-02T13:39:37.997Z",
-    "timeFormatted": "01:39 PM"
+    "timeFormatted": "01:39 PM",
+    "messageType": "message"
   },
   {
     "channelId": "general",
@@ -220,7 +248,8 @@
     "isDirectMessage": false,
     "id": "msg-1793626784267-1dzyn",
     "timestamp": "2026-11-02T13:39:44.267Z",
-    "timeFormatted": "01:39 PM"
+    "timeFormatted": "01:39 PM",
+    "messageType": "message"
   },
   {
     "channelId": "general",
@@ -232,7 +261,8 @@
     "isDirectMessage": false,
     "id": "msg-1793626852385-1c0rw",
     "timestamp": "2026-11-02T13:40:52.385Z",
-    "timeFormatted": "01:40 PM"
+    "timeFormatted": "01:40 PM",
+    "messageType": "message"
   },
   {
     "id": "msg-seed-call-1",
@@ -253,7 +283,9 @@
       "type": "video",
       "action": "ended",
       "duration": "4 mins 18 secs"
-    }
+    },
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "id": "msg-staff-admin-directive-1",
@@ -273,7 +305,9 @@
       "🚀": [
         "usr-accountant"
       ]
-    }
+    },
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "id": "msg-staff-stock-reply-1",
@@ -288,7 +322,9 @@
       "👏": [
         "usr-admin"
       ]
-    }
+    },
+    "messageType": "message",
+    "isDirectMessage": false
   },
   {
     "id": "msg-dm-admin-stock-1",
@@ -304,7 +340,8 @@
       "📦": [
         "usr-stock"
       ]
-    }
+    },
+    "messageType": "message"
   },
   {
     "id": "msg-dm-admin-cashier-1",
@@ -320,7 +357,8 @@
       "💳": [
         "usr-cashier"
       ]
-    }
+    },
+    "messageType": "message"
   },
   {
     "id": "msg-dm-admin-accountant-1",
@@ -336,7 +374,8 @@
       "📊": [
         "usr-accountant"
       ]
-    }
+    },
+    "messageType": "message"
   },
   {
     "id": "msg-dm-admin-sales-1",
@@ -352,7 +391,8 @@
       "🤝": [
         "usr-sales"
       ]
-    }
+    },
+    "messageType": "message"
   },
   {
     "channelId": "general",
@@ -372,7 +412,9 @@
     "isOfficialReply": true,
     "status": "answered",
     "answeredBy": "Florentine Mushimiyimana",
-    "answeredAt": "2026-11-10T14:40:11.785Z"
+    "answeredAt": "2026-11-10T14:40:11.785Z",
+    "messageType": "answer",
+    "isDirectMessage": false
   },
   {
     "channelId": "general",
@@ -386,6 +428,51 @@
     "timeFormatted": "02:40 PM",
     "isOfficialReply": false,
     "status": "answered",
-    "answeredAt": "2026-11-10T14:40:38.399Z"
+    "answeredAt": "2026-11-10T14:40:38.399Z",
+    "messageType": "question",
+    "isDirectMessage": false
+  },
+  {
+    "id": "msg-seed-q-1",
+    "channelId": "general",
+    "senderId": "usr-customer-2",
+    "senderName": "Jean-Luc Habimana",
+    "senderRole": "customer",
+    "messageType": "question",
+    "status": "answered",
+    "answeredBy": "Florentine Mushimiyimana",
+    "content": "Do you offer same-day cold-chain delivery to Kimihurura for orders placed before 4:00 PM?",
+    "timestamp": "2026-11-17T12:28:48.706Z",
+    "timeFormatted": "2 hrs ago",
+    "reactions": {
+      "👍": [
+        "usr-customer-1"
+      ]
+    }
+  },
+  {
+    "id": "msg-seed-a-1",
+    "channelId": "general",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "messageType": "answer",
+    "isOfficialReply": true,
+    "status": "answered",
+    "answeredBy": "Florentine Mushimiyimana",
+    "content": "Yes Jean-Luc! Orders placed before 4:00 PM qualify for same-day chilled Solar Moto delivery across Kimihurura, Kacyiru, Remera, and Nyarugenge within 35–55 minutes.",
+    "timestamp": "2026-11-17T12:34:48.706Z",
+    "timeFormatted": "2 hrs ago",
+    "reactions": {
+      "🌿": [
+        "usr-customer-2",
+        "usr-customer-1"
+      ]
+    },
+    "replyTo": {
+      "id": "msg-seed-q-1",
+      "senderName": "Jean-Luc Habimana",
+      "content": "Do you offer same-day cold-chain delivery to Kimihurura for orders placed..."
+    }
   }
 ]

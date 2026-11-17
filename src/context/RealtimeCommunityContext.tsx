@@ -1,6 +1,21 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { User, ChatMessage, ChatOnlineUser, PresenceToast, ChatChannel } from '../types';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
+import { User, ChatMessage, ChatMessageType, ChatOnlineUser, PresenceToast } from '../types';
 import { soundService } from '../services/soundService';
+import {
+  auth,
+  subscribeToPublicChatMessages,
+  publishChatMessageToFirestore,
+  updateChatQuestionStatusInFirestore,
+  deleteChatMessageInFirestore,
+} from '../lib/firebase';
+
+export interface ActiveChatTarget {
+  user?: ChatOnlineUser;
+  channelId?: string;
+  prefillReply?: string;
+  replyToMessage?: ChatMessage;
+}
 
 interface RealtimeCommunityContextType {
   onlineUsers: ChatOnlineUser[];
@@ -8,22 +23,20 @@ interface RealtimeCommunityContextType {
   toasts: PresenceToast[];
   isConnected: boolean;
   soundEnabled: boolean;
+  chatError: string | null;
+  clearChatError: () => void;
   toggleSound: () => boolean;
   dismissToast: (id: string) => void;
   clearUnread: () => void;
-  openChatForResponse: (target: {
-    user?: ChatOnlineUser;
-    channelId?: string;
-    prefillReply?: string;
-  }) => void;
-  activeChatTarget: {
-    user?: ChatOnlineUser;
-    channelId?: string;
-    prefillReply?: string;
-  } | null;
+  openChatForResponse: (target: ActiveChatTarget) => void;
+  activeChatTarget: ActiveChatTarget | null;
   clearActiveChatTarget: () => void;
   deleteMessage: (messageId: string) => Promise<boolean>;
   updateMessageStatus: (messageId: string, status: 'pending' | 'answered') => Promise<boolean>;
+  postOfficialAdminReply: (
+    parentMsg: ChatMessage,
+    content: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   latestMessages: ChatMessage[];
   sendMessage: (payload: {
     channelId: string;
@@ -31,6 +44,8 @@ interface RealtimeCommunityContextType {
     senderId: string;
     senderName: string;
     senderRole: string;
+    messageType?: ChatMessageType;
+    isOfficialReply?: boolean;
     senderAvatar?: string;
     replyTo?: { id: string; senderName: string; content: string };
     productTag?: any;
@@ -55,15 +70,14 @@ export const RealtimeCommunityProvider: React.FC<{
   const [toasts, setToasts] = useState<PresenceToast[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(soundService.isEnabled());
-  const [activeChatTarget, setActiveChatTarget] = useState<{
-    user?: ChatOnlineUser;
-    channelId?: string;
-    prefillReply?: string;
-  } | null>(null);
-  const [latestMessages, setLatestMessages] = useState<ChatMessage[]>([]);
+  const [activeChatTarget, setActiveChatTarget] = useState<ActiveChatTarget | null>(null);
+  const [serverMessages, setServerMessages] = useState<ChatMessage[]>([]);
+  const [firestoreMessages, setFirestoreMessages] = useState<ChatMessage[]>([]);
+  const [chatError, setChatError] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<any>(null);
+  const errorTimeoutRef = useRef<any>(null);
   const isChatModalOpenRef = useRef(isChatModalOpen);
   isChatModalOpenRef.current = isChatModalOpen;
 
@@ -90,6 +104,19 @@ export const RealtimeCommunityProvider: React.FC<{
   const currentUserName = currentUser ? currentUser.name : 'Kigali Shopper';
   const currentUserRole = currentUser ? currentUser.role : 'customer';
 
+  const triggerChatError = (message: string) => {
+    setChatError(message);
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+    errorTimeoutRef.current = setTimeout(() => {
+      setChatError(null);
+    }, 6000);
+  };
+
+  const clearChatError = () => {
+    setChatError(null);
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+  };
+
   // Toggle sound
   const toggleSound = () => {
     const updated = soundService.toggleSound();
@@ -109,14 +136,9 @@ export const RealtimeCommunityProvider: React.FC<{
     setActiveChatTarget(null);
   };
 
-  const openChatForResponse = (target: {
-    user?: ChatOnlineUser;
-    channelId?: string;
-    prefillReply?: string;
-  }) => {
-    const cleanChannelId = target.channelId && target.channelId.startsWith('dm:')
-      ? 'general'
-      : target.channelId;
+  const openChatForResponse = (target: ActiveChatTarget) => {
+    const cleanChannelId =
+      target.channelId && target.channelId.startsWith('dm:') ? 'general' : target.channelId;
     setActiveChatTarget({
       ...target,
       channelId: cleanChannelId
@@ -141,9 +163,54 @@ export const RealtimeCommunityProvider: React.FC<{
     }, 7500);
   };
 
+  // Subscribe to Firestore chat_messages when Firebase Auth is active
+  useEffect(() => {
+    let unsubFirestore: (() => void) | null = null;
+
+    const unsubAuth = onAuthStateChanged(auth, (fbUser) => {
+      if (unsubFirestore) {
+        unsubFirestore();
+        unsubFirestore = null;
+      }
+      if (fbUser) {
+        unsubFirestore = subscribeToPublicChatMessages((msgs) => {
+          setFirestoreMessages(msgs);
+        });
+      } else {
+        setFirestoreMessages([]);
+      }
+    });
+
+    return () => {
+      unsubAuth();
+      if (unsubFirestore) unsubFirestore();
+    };
+  }, []);
+
+  // Merge Express WebSocket messages + Firestore messages deduplicated by id
+  const latestMessages = useMemo(() => {
+    if (firestoreMessages.length === 0) return serverMessages;
+    const seen = new Set(serverMessages.map(m => m.id));
+    const extraFromFirestore = firestoreMessages.filter(m => !seen.has(m.id));
+    if (extraFromFirestore.length === 0) return serverMessages;
+    return [...serverMessages, ...extraFromFirestore].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, [serverMessages, firestoreMessages]);
+
   // Connect to WebSocket server on /ws/chat
   useEffect(() => {
     let isMounted = true;
+
+    // Seed immediately via REST so messages are visible even before WS finishes handshake
+    fetch('/api/chat/messages')
+      .then(r => (r.ok ? r.json() : []))
+      .then((initial) => {
+        if (isMounted && Array.isArray(initial) && initial.length > 0) {
+          setServerMessages(prev => (prev.length === 0 ? initial : prev));
+        }
+      })
+      .catch(() => {});
 
     function connect() {
       try {
@@ -180,7 +247,7 @@ export const RealtimeCommunityProvider: React.FC<{
                   setOnlineUsers(initialUsers);
                 }
                 if (Array.isArray(initialMsgs)) {
-                  setLatestMessages(initialMsgs);
+                  setServerMessages(initialMsgs);
                 }
                 break;
               }
@@ -214,7 +281,7 @@ export const RealtimeCommunityProvider: React.FC<{
                 const msg: ChatMessage = data.payload;
                 if (!msg) return;
 
-                setLatestMessages(prev => {
+                setServerMessages(prev => {
                   if (prev.some(m => m.id === msg.id)) return prev;
                   return [...prev, msg].slice(-500);
                 });
@@ -241,7 +308,7 @@ export const RealtimeCommunityProvider: React.FC<{
               case 'chat:reaction': {
                 const { messageId, reactions } = data.payload || {};
                 if (messageId && reactions) {
-                  setLatestMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions } : m));
+                  setServerMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions } : m));
                 }
                 break;
               }
@@ -249,7 +316,7 @@ export const RealtimeCommunityProvider: React.FC<{
               case 'chat:delete': {
                 const { messageId } = data.payload || {};
                 if (messageId) {
-                  setLatestMessages(prev => prev.filter(m => m.id !== messageId));
+                  setServerMessages(prev => prev.filter(m => m.id !== messageId));
                 }
                 break;
               }
@@ -257,13 +324,19 @@ export const RealtimeCommunityProvider: React.FC<{
               case 'chat:status': {
                 const { messageId, status, message } = data.payload || {};
                 if (messageId) {
-                  setLatestMessages(prev => prev.map(m => {
+                  setServerMessages(prev => prev.map(m => {
                     if (m.id === messageId) {
                       return message || { ...m, status };
                     }
                     return m;
                   }));
                 }
+                break;
+              }
+
+              case 'chat:error': {
+                const errMsg = data.payload?.message || 'Permission denied for this chat action.';
+                triggerChatError(errMsg);
                 break;
               }
             }
@@ -293,6 +366,7 @@ export const RealtimeCommunityProvider: React.FC<{
     return () => {
       isMounted = false;
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
       if (socketRef.current) {
         socketRef.current.close();
       }
@@ -357,23 +431,134 @@ export const RealtimeCommunityProvider: React.FC<{
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      }).catch(err => console.warn('Chat send fallback:', err));
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            if (errData?.error) triggerChatError(errData.error);
+          }
+        })
+        .catch(err => console.warn('Chat send fallback:', err));
+    }
+
+    if (auth.currentUser?.emailVerified) {
+      const firestoreType: ChatMessageType =
+        payload.messageType ||
+        (payload.isOfficialReply ? 'answer' : payload.replyTo ? 'reply' : 'message');
+      publishChatMessageToFirestore({
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        channelId: payload.channelId || 'general',
+        senderName: payload.senderName || currentUserName,
+        senderRole: payload.senderRole || currentUserRole,
+        messageType: firestoreType,
+        content: payload.content || '',
+        isOfficialReply: Boolean(payload.isOfficialReply),
+        replyTo: payload.replyTo,
+      }).catch(err => console.warn('Firestore chat sync:', err));
+    }
+  };
+
+  // Post an official Admin answer to a question or thread (used by AdminPanel inline responder)
+  const postOfficialAdminReply = async (
+    parentMsg: ChatMessage,
+    content: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const trimmed = content.trim();
+    if (!trimmed) {
+      return { ok: false, error: 'Please write an answer before sending.' };
+    }
+    if (currentUserRole !== 'admin') {
+      const msg = 'Only the Admin is permitted to provide answers to questions.';
+      triggerChatError(msg);
+      return { ok: false, error: msg };
+    }
+
+    const payload = {
+      channelId: parentMsg.channelId || 'general',
+      senderId: currentUserId,
+      senderName: currentUserName,
+      senderRole: 'admin',
+      messageType: 'answer' as ChatMessageType,
+      isOfficialReply: true,
+      content: trimmed,
+      replyTo: {
+        id: parentMsg.id,
+        senderName: parentMsg.senderName,
+        content: parentMsg.content.length > 70 ? `${parentMsg.content.slice(0, 70)}...` : parentMsg.content
+      }
+    };
+
+    try {
+      const res = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errMsg = data?.error || 'Failed to publish Admin answer.';
+        triggerChatError(errMsg);
+        return { ok: false, error: errMsg };
+      }
+
+      const savedMsg: ChatMessage | null = data?.message || (data?.id ? data : null);
+      if (savedMsg) {
+        setServerMessages(prev => {
+          const updatedParent = prev.map(m =>
+            m.id === parentMsg.id
+              ? { ...m, status: 'answered' as const, answeredBy: currentUserName, answeredAt: new Date().toISOString() }
+              : m
+          );
+          if (updatedParent.some(m => m.id === savedMsg.id)) return updatedParent;
+          return [...updatedParent, savedMsg];
+        });
+      }
+
+      if (auth.currentUser?.emailVerified) {
+        publishChatMessageToFirestore({
+          id: savedMsg?.id || `msg-${Date.now()}`,
+          channelId: payload.channelId,
+          senderName: payload.senderName,
+          senderRole: 'admin',
+          messageType: 'answer',
+          content: trimmed,
+          isOfficialReply: true,
+          replyTo: payload.replyTo,
+        }).catch(err => console.warn('Firestore Admin answer sync:', err));
+      }
+
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: 'Network error while posting Admin answer.' };
     }
   };
 
   // Delete message helper (Admin only)
   const deleteMessage = async (messageId: string): Promise<boolean> => {
+    if (currentUserRole !== 'admin') {
+      triggerChatError('Only the Administrator can delete messages.');
+      return false;
+    }
+    if (auth.currentUser?.emailVerified) {
+      deleteChatMessageInFirestore(messageId).catch(err =>
+        console.warn('Firestore delete sync:', err)
+      );
+    }
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'chat:delete',
         payload: { messageId }
       }));
+      setServerMessages(prev => prev.filter(m => m.id !== messageId));
       return true;
     }
     try {
       const res = await fetch(`/api/chat/messages/${messageId}?role=${currentUserRole}`, {
         method: 'DELETE'
       });
+      if (res.ok) {
+        setServerMessages(prev => prev.filter(m => m.id !== messageId));
+      }
       return res.ok;
     } catch (err) {
       console.warn('Delete message failed:', err);
@@ -383,11 +568,21 @@ export const RealtimeCommunityProvider: React.FC<{
 
   // Update question status helper (Admin only)
   const updateMessageStatus = async (messageId: string, status: 'pending' | 'answered'): Promise<boolean> => {
+    if (currentUserRole !== 'admin') {
+      triggerChatError('Only the Administrator can update question status.');
+      return false;
+    }
+    if (auth.currentUser?.emailVerified) {
+      updateChatQuestionStatusInFirestore(messageId, status, currentUserName).catch(err =>
+        console.warn('Firestore status sync:', err)
+      );
+    }
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'chat:status',
         payload: { messageId, status }
       }));
+      setServerMessages(prev => prev.map(m => (m.id === messageId ? { ...m, status } : m)));
       return true;
     }
     try {
@@ -396,6 +591,9 @@ export const RealtimeCommunityProvider: React.FC<{
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, role: currentUserRole, answeredBy: currentUserName })
       });
+      if (res.ok) {
+        setServerMessages(prev => prev.map(m => (m.id === messageId ? { ...m, status } : m)));
+      }
       return res.ok;
     } catch (err) {
       console.warn('Update message status failed:', err);
@@ -411,6 +609,8 @@ export const RealtimeCommunityProvider: React.FC<{
         toasts,
         isConnected,
         soundEnabled,
+        chatError,
+        clearChatError,
         toggleSound,
         dismissToast,
         clearUnread,
@@ -419,6 +619,7 @@ export const RealtimeCommunityProvider: React.FC<{
         clearActiveChatTarget,
         latestMessages,
         sendMessage,
+        postOfficialAdminReply,
         deleteMessage,
         updateMessageStatus
       }}

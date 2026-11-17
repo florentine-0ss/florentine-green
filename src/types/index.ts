@@ -299,6 +299,8 @@ export interface ChatCallSession {
 }
 
 // 4. Community & Member Chat Types
+export type ChatMessageType = 'question' | 'reply' | 'answer' | 'message';
+
 export interface ChatMessage {
   id: string;
   channelId: string;
@@ -306,6 +308,7 @@ export interface ChatMessage {
   senderName: string;
   senderRole: UserRole | 'customer' | 'admin' | string;
   senderAvatar?: string;
+  messageType?: ChatMessageType;
   content: string;
   timestamp: string;
   timeFormatted: string;
@@ -333,7 +336,7 @@ export interface ChatMessage {
   recipientId?: string;
   recipientName?: string;
   isOfficialReply?: boolean;
-  status?: 'pending' | 'answered';
+  status?: 'pending' | 'answered' | 'open';
   answeredBy?: string;
   answeredAt?: string;
 }
@@ -410,4 +413,16 @@ export interface DeliveryZoneSelection {
   fee: number;
   estimatedHours: string;
   fulfillmentMode: 'delivery' | 'pickup' | 'diaspora';
+}
+
+export interface CountryLocation {
+  id: string;
+  country: string;
+  province: string;
+  district: string;
+  sectors: string[];
+  fee: number;
+  estimatedHours: string;
+  mode: 'delivery' | 'pickup' | 'diaspora';
+  isActive: boolean;
 }

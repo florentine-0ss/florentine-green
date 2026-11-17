@@ -1,5 +1,5 @@
-import { Product, Order, CustomerReview, SystemActivity, MealKit } from '../types';
-import { INITIAL_PRODUCTS, INITIAL_ORDERS, MEAL_KITS, INITIAL_ACTIVITIES, INITIAL_REVIEWS } from '../data/mockData';
+import { Product, Order, CustomerReview, SystemActivity, MealKit, CountryLocation } from '../types';
+import { INITIAL_PRODUCTS, INITIAL_ORDERS, MEAL_KITS, INITIAL_ACTIVITIES, INITIAL_REVIEWS, INITIAL_COUNTRY_LOCATIONS } from '../data/mockData';
 
 export interface DatabaseHealth {
   status: string;
@@ -233,6 +233,73 @@ export const api = {
     } catch {
       return { ...act, id: `ACT-${Date.now()}`, time: 'Just now', timestamp: new Date().toISOString() };
     }
+  },
+
+  // Country Delivery Locations
+  async getLocations(activeOnly?: boolean): Promise<CountryLocation[]> {
+    try {
+      const url = activeOnly ? '/api/locations?activeOnly=true' : '/api/locations';
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to fetch locations');
+      return await res.json();
+    } catch {
+      return activeOnly
+        ? INITIAL_COUNTRY_LOCATIONS.filter(l => l.isActive)
+        : INITIAL_COUNTRY_LOCATIONS;
+    }
+  },
+
+  async addLocation(
+    payload: Omit<CountryLocation, 'id'>,
+    role: string = 'admin'
+  ): Promise<CountryLocation> {
+    const res = await fetch('/api/locations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-role': role
+      },
+      body: JSON.stringify({ ...payload, role })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to add location');
+    }
+    return await res.json();
+  },
+
+  async updateLocation(
+    id: string,
+    updates: Partial<CountryLocation>,
+    role: string = 'admin'
+  ): Promise<CountryLocation> {
+    const res = await fetch(`/api/locations/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-role': role
+      },
+      body: JSON.stringify({ ...updates, role })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to update location');
+    }
+    return await res.json();
+  },
+
+  async deleteLocation(id: string, role: string = 'admin'): Promise<boolean> {
+    const res = await fetch(`/api/locations/${id}?role=${encodeURIComponent(role)}`, {
+      method: 'DELETE',
+      headers: {
+        'x-user-role': role
+      }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete location');
+    }
+    return true;
   },
 
   // Reset database

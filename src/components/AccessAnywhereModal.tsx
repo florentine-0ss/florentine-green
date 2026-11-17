@@ -19,8 +19,8 @@ import {
   Globe,
   MessageCircle,
 } from 'lucide-react';
-import { CartItem, DeliveryZoneSelection, Product } from '../types';
-import { RWANDA_LOCATIONS } from '../data/mockData';
+import { CartItem, CountryLocation, DeliveryZoneSelection, Product } from '../types';
+import { INITIAL_COUNTRY_LOCATIONS } from '../data/mockData';
 import { offlineCache } from '../services/offlineCache';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { usePWAInstall } from '../hooks/usePWAInstall';
@@ -31,6 +31,7 @@ interface AccessAnywhereModalProps {
   onClose: () => void;
   selectedLocation: DeliveryZoneSelection;
   onSelectLocation: (loc: DeliveryZoneSelection) => void;
+  locations?: CountryLocation[];
   products: Product[];
   cart: CartItem[];
   isCompactMode: boolean;
@@ -46,6 +47,7 @@ export const AccessAnywhereModal: React.FC<AccessAnywhereModalProps> = ({
   onClose,
   selectedLocation,
   onSelectLocation,
+  locations,
   products,
   cart,
   isCompactMode,
@@ -53,6 +55,7 @@ export const AccessAnywhereModal: React.FC<AccessAnywhereModalProps> = ({
   onRefreshOfflineCache,
   onShowToast,
 }) => {
+  const availableLocations = locations && locations.length > 0 ? locations : INITIAL_COUNTRY_LOCATIONS;
   const [activeTab, setActiveTab] = useState<HubTab>('location');
   const [draftDistrict, setDraftDistrict] = useState(selectedLocation.district);
   const [draftSector, setDraftSector] = useState(selectedLocation.sector);
@@ -70,7 +73,7 @@ export const AccessAnywhereModal: React.FC<AccessAnywhereModalProps> = ({
   }, [selectedLocation, isOpen]);
 
   const activeDistrictDef =
-    RWANDA_LOCATIONS.find((d) => d.district === draftDistrict) || RWANDA_LOCATIONS[0];
+    availableLocations.find((d) => d.district === draftDistrict) || availableLocations[0];
 
   const storeAccessUrl = offlineCache.buildStoreAccessUrl({
     ...selectedLocation,
@@ -102,7 +105,7 @@ export const AccessAnywhereModal: React.FC<AccessAnywhereModalProps> = ({
 
   const handleDistrictChange = (districtName: string) => {
     setDraftDistrict(districtName);
-    const found = RWANDA_LOCATIONS.find((l) => l.district === districtName);
+    const found = availableLocations.find((l) => l.district === districtName);
     if (found && found.sectors.length > 0) {
       setDraftSector(found.sectors[0]);
     }
@@ -147,7 +150,7 @@ export const AccessAnywhereModal: React.FC<AccessAnywhereModalProps> = ({
             targetDistrict = 'Southern Province';
           }
         }
-        const matched = RWANDA_LOCATIONS.find((l) => l.district === targetDistrict) || RWANDA_LOCATIONS[0];
+        const matched = availableLocations.find((l) => l.district === targetDistrict) || availableLocations[0];
         setDraftDistrict(matched.district);
         setDraftSector(matched.sectors[0]);
         setGeoFeedback(
@@ -328,9 +331,9 @@ export const AccessAnywhereModal: React.FC<AccessAnywhereModalProps> = ({
                     onChange={(e) => handleDistrictChange(e.target.value)}
                     className="w-full bg-stone-50 border border-stone-300 rounded-xl px-3 py-2.5 text-sm font-medium text-stone-900 cursor-pointer"
                   >
-                    {RWANDA_LOCATIONS.map((loc) => (
-                      <option key={loc.district} value={loc.district}>
-                        {loc.district}
+                    {availableLocations.map((loc) => (
+                      <option key={loc.id || loc.district} value={loc.district}>
+                        {loc.country && loc.country !== 'Rwanda' ? `${loc.district} (${loc.country})` : loc.district}
                       </option>
                     ))}
                   </select>

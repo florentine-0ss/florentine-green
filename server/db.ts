@@ -93,6 +93,18 @@ export interface SystemActivity {
   metadata?: Record<string, any>;
 }
 
+export interface CountryLocation {
+  id: string;
+  country: string;
+  province: string;
+  district: string;
+  sectors: string[];
+  fee: number;
+  estimatedHours: string;
+  mode: 'delivery' | 'pickup' | 'diaspora';
+  isActive: boolean;
+}
+
 export interface DatabaseSchema {
   version: string;
   lastUpdated: string;
@@ -101,6 +113,7 @@ export interface DatabaseSchema {
   mealKits: MealKit[];
   reviews: CustomerReview[];
   activities: SystemActivity[];
+  locations: CountryLocation[];
   settings: {
     storeName: string;
     currency: string;
@@ -110,6 +123,18 @@ export interface DatabaseSchema {
     contactEmail: string;
   };
 }
+
+const DEFAULT_LOCATIONS: CountryLocation[] = [
+  { id: 'loc-gasabo', country: 'Rwanda', province: 'Kigali City', district: 'Gasabo', sectors: ['Kacyiru', 'Kimihurura', 'Kibagabaga', 'Gisozi', 'Nyarutarama', 'Remera', 'Kinyinya'], fee: 2000, estimatedHours: '1 - 2 hours', mode: 'delivery', isActive: true },
+  { id: 'loc-kicukiro', country: 'Rwanda', province: 'Kigali City', district: 'Kicukiro', sectors: ['Niboye', 'Kagarama', 'Kanombe', 'Gikondo', 'Masaka', 'Kicukiro Centre'], fee: 2500, estimatedHours: '1 - 3 hours', mode: 'delivery', isActive: true },
+  { id: 'loc-nyarugenge', country: 'Rwanda', province: 'Kigali City', district: 'Nyarugenge', sectors: ['Kiyovu', 'Nyamirambo', 'Biryogo', 'Muhima', 'Kimisagara', 'Kigali CBD'], fee: 1800, estimatedHours: '1 - 2 hours', mode: 'delivery', isActive: true },
+  { id: 'loc-northern', country: 'Rwanda', province: 'Northern Province', district: 'Northern Province', sectors: ['Musanze Town', 'Kinigi', 'Gicumbi', 'Burera'], fee: 4500, estimatedHours: 'Same Day / Next 8:00 AM', mode: 'delivery', isActive: true },
+  { id: 'loc-western', country: 'Rwanda', province: 'Western Province', district: 'Western Province', sectors: ['Rubavu / Gisenyi', 'Karongi / Kibuye', 'Rusizi / Kamembe'], fee: 5500, estimatedHours: 'Next Morning 8:30 AM', mode: 'delivery', isActive: true },
+  { id: 'loc-southern', country: 'Rwanda', province: 'Southern Province', district: 'Southern Province', sectors: ['Huye / Butare', 'Muhanga / Gitarama', 'Nyanza', 'Nyamagabe'], fee: 4500, estimatedHours: 'Same Day Afternoon / 9:00 AM', mode: 'delivery', isActive: true },
+  { id: 'loc-eastern', country: 'Rwanda', province: 'Eastern Province', district: 'Eastern Province', sectors: ['Rwamagana', 'Kayonza', 'Nyagatare', 'Bugesera / Nyamata'], fee: 4000, estimatedHours: '2 - 4 hours', mode: 'delivery', isActive: true },
+  { id: 'loc-pickup', country: 'Rwanda', province: 'Pickup Hubs', district: 'Pickup Hubs (0 Fee)', sectors: ['Kigali Heights Cold Locker', 'Kimironko Farm Stand', 'Musanze Cooperative Depot'], fee: 0, estimatedHours: 'Ready in 30 mins', mode: 'pickup', isActive: true },
+  { id: 'loc-diaspora', country: 'Rwanda', province: 'International / Diaspora', district: 'Diaspora Gift Delivery', sectors: ['Send to Family in Kigali', 'Send to Family Upcountry', 'Corporate Gift Box (All Rwanda)'], fee: 2500, estimatedHours: 'Delivered with Photo Proof', mode: 'diaspora', isActive: true }
+];
 
 // Initial Seed Data
 const DEFAULT_PRODUCTS: Product[] = [
@@ -745,6 +770,10 @@ class FofoDatabase {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
         if (parsed && parsed.products && parsed.products.length > 0) {
+          if (!parsed.locations || !Array.isArray(parsed.locations) || parsed.locations.length === 0) {
+            parsed.locations = [...DEFAULT_LOCATIONS];
+            this.saveToFile(parsed);
+          }
           return parsed;
         }
       }
@@ -761,6 +790,7 @@ class FofoDatabase {
       mealKits: DEFAULT_MEAL_KITS,
       reviews: DEFAULT_REVIEWS,
       activities: DEFAULT_ACTIVITIES,
+      locations: [...DEFAULT_LOCATIONS],
       settings: {
         storeName: 'Fofo GreenGrocer Hub Rwanda',
         currency: 'FRW',
@@ -1012,6 +1042,106 @@ class FofoDatabase {
     };
   }
 
+  // --- Country Locations CRUD ---
+  public getLocations(activeOnly?: boolean): CountryLocation[] {
+    const list = Array.isArray(this.data.locations) && this.data.locations.length > 0
+      ? this.data.locations
+      : [...DEFAULT_LOCATIONS];
+    if (activeOnly) {
+      return list.filter(loc => loc.isActive !== false);
+    }
+    return [...list];
+  }
+
+  public addLocation(loc: Omit<CountryLocation, 'id'>): CountryLocation {
+    if (!Array.isArray(this.data.locations)) {
+      this.data.locations = [...DEFAULT_LOCATIONS];
+    }
+    const slug = loc.district.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'zone';
+    const newLoc: CountryLocation = {
+      id: `loc-${slug}-${Date.now().toString(36).slice(-4)}`,
+      country: (loc.country || 'Rwanda').trim(),
+      province: (loc.province || 'Kigali City').trim(),
+      district: loc.district.trim(),
+      sectors: loc.sectors.map(s => s.trim()).filter(Boolean),
+      fee: Math.max(0, Number(loc.fee) || 0),
+      estimatedHours: (loc.estimatedHours || '2 - 4 hours').trim(),
+      mode: loc.mode || 'delivery',
+      isActive: loc.isActive !== false
+    };
+
+    this.data.locations.unshift(newLoc);
+    this.addActivity({
+      title: 'Country Delivery Location Added',
+      detail: `Added ${newLoc.district} (${newLoc.country} · ${newLoc.province}) with ${newLoc.sectors.length} sectors/cities at ${newLoc.fee.toLocaleString()} FRW.`,
+      type: 'system',
+      status: 'success',
+      actor: 'Admin',
+      actorRole: 'admin',
+      metadata: { locationId: newLoc.id, country: newLoc.country, district: newLoc.district }
+    });
+    this.saveToFile();
+    return newLoc;
+  }
+
+  public updateLocation(id: string, updates: Partial<CountryLocation>): CountryLocation | null {
+    if (!Array.isArray(this.data.locations)) {
+      this.data.locations = [...DEFAULT_LOCATIONS];
+    }
+    const idx = this.data.locations.findIndex(l => l.id === id);
+    if (idx === -1) return null;
+    const prev = this.data.locations[idx];
+    const updated: CountryLocation = {
+      ...prev,
+      ...updates,
+      id,
+      country: updates.country !== undefined ? updates.country.trim() : prev.country,
+      province: updates.province !== undefined ? updates.province.trim() : prev.province,
+      district: updates.district !== undefined ? updates.district.trim() : prev.district,
+      sectors: updates.sectors !== undefined
+        ? updates.sectors.map(s => s.trim()).filter(Boolean)
+        : prev.sectors,
+      fee: updates.fee !== undefined ? Math.max(0, Number(updates.fee) || 0) : prev.fee,
+      estimatedHours: updates.estimatedHours !== undefined ? updates.estimatedHours.trim() : prev.estimatedHours,
+      mode: updates.mode || prev.mode,
+      isActive: updates.isActive !== undefined ? Boolean(updates.isActive) : prev.isActive
+    };
+    this.data.locations[idx] = updated;
+
+    this.addActivity({
+      title: 'Country Delivery Location Updated',
+      detail: `Updated ${updated.district} (${updated.country}) — ${updated.fee.toLocaleString()} FRW, Status: ${updated.isActive ? 'Active' : 'Disabled'}.`,
+      type: 'system',
+      status: 'info',
+      actor: 'Admin',
+      actorRole: 'admin',
+      metadata: { locationId: id, district: updated.district }
+    });
+    this.saveToFile();
+    return updated;
+  }
+
+  public deleteLocation(id: string): boolean {
+    if (!Array.isArray(this.data.locations)) {
+      this.data.locations = [...DEFAULT_LOCATIONS];
+    }
+    const idx = this.data.locations.findIndex(l => l.id === id);
+    if (idx === -1) return false;
+    const removed = this.data.locations.splice(idx, 1)[0];
+
+    this.addActivity({
+      title: 'Country Delivery Location Removed',
+      detail: `Removed ${removed.district} (${removed.country}) from delivery coverage.`,
+      type: 'system',
+      status: 'warning',
+      actor: 'Admin',
+      actorRole: 'admin',
+      metadata: { locationId: id, district: removed.district }
+    });
+    this.saveToFile();
+    return true;
+  }
+
   // Reset database to factory seed
   public resetToSeed() {
     this.data.products = [...DEFAULT_PRODUCTS];
@@ -1019,6 +1149,7 @@ class FofoDatabase {
     this.data.mealKits = [...DEFAULT_MEAL_KITS];
     this.data.reviews = [...DEFAULT_REVIEWS];
     this.data.activities = [...DEFAULT_ACTIVITIES];
+    this.data.locations = [...DEFAULT_LOCATIONS];
     this.saveToFile();
     return { success: true, message: 'Database reset to fresh Rwandan farm catalog seed' };
   }

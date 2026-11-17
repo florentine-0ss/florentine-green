@@ -57,7 +57,7 @@ import {
   HelpCircle,
   CornerDownRight
 } from 'lucide-react';
-import { Product, User, Order, SystemActivity, UserRole, StaffPermissions, FinancialRecord, SalesReceipt, ChatMessage } from '../types';
+import { Product, User, Order, SystemActivity, UserRole, StaffPermissions, FinancialRecord, SalesReceipt, ChatMessage, CountryLocation } from '../types';
 import { DEFAULT_ROLE_PERMISSIONS } from '../data/mockData';
 import { api, DbSystemStatus, SqlQueryResult } from '../services/api';
 import { useRealtimeCommunity } from '../context/RealtimeCommunityContext';
@@ -77,6 +77,10 @@ interface AdminPanelProps {
   onUpdateUserRole?: (userId: string, newRole: UserRole) => void;
   onUpdateUserPermissions?: (userId: string, permissions: StaffPermissions) => void;
   onAddStaffUser?: (newUser: User) => void;
+  locations?: CountryLocation[];
+  onAddLocation?: (loc: Omit<CountryLocation, 'id'>) => Promise<void> | void;
+  onUpdateLocation?: (id: string, updates: Partial<CountryLocation>) => Promise<void> | void;
+  onDeleteLocation?: (id: string) => Promise<void> | void;
   financialRecords?: FinancialRecord[];
   receipts?: SalesReceipt[];
   activities: SystemActivity[];
@@ -84,7 +88,7 @@ interface AdminPanelProps {
   onSimulatePaymentAction: () => void;
   onClearActivities: () => void;
   cartCount: number;
-  initialTab?: 'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat';
+  initialTab?: 'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat' | 'locations';
   dbHealth?: any;
   onResetDb?: () => void;
   onOpenStockManager?: () => void;
@@ -110,6 +114,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onUpdateUserRole,
   onUpdateUserPermissions,
   onAddStaffUser,
+  locations = [],
+  onAddLocation,
+  onUpdateLocation,
+  onDeleteLocation,
   financialRecords = [],
   receipts = [],
   activities,
@@ -127,12 +135,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onOpenCustomerMarket,
   onOpenCommunityChat
 }) => {
-  const [activeTab, setActiveTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat'>(initialTab);
-  const { latestMessages, deleteMessage, updateMessageStatus, openChatForResponse } = useRealtimeCommunity();
-  const [chatFilter, setChatFilter] = useState<'all' | 'pending' | 'answered'>('all');
+  const [activeTab, setActiveTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat' | 'locations'>(initialTab);
+  const { latestMessages, deleteMessage, updateMessageStatus, openChatForResponse, postOfficialAdminReply } = useRealtimeCommunity();
+  const [chatFilter, setChatFilter] = useState<'all' | 'questions' | 'pending' | 'answered'>('all');
   const [chatSearch, setChatSearch] = useState('');
+  const [inlineReplyTargetId, setInlineReplyTargetId] = useState<string | null>(null);
+  const [inlineReplyText, setInlineReplyText] = useState('');
+  const [inlineReplyError, setInlineReplyError] = useState<string | null>(null);
+  const [isSubmittingReply, setIsSubmittingReply] = useState(false);
+  const [confirmDeleteMsgId, setConfirmDeleteMsgId] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<SystemActivity | null>(null);
+
+  // Country Locations Management State
+  const [isAddLocationOpen, setIsAddLocationOpen] = useState(false);
+  const [locationSearch, setLocationSearch] = useState('');
+  const [locationModeFilter, setLocationModeFilter] = useState<'all' | 'delivery' | 'pickup' | 'diaspora'>('all');
+  const [locationFormError, setLocationFormError] = useState<string | null>(null);
+  const [isSavingLocation, setIsSavingLocation] = useState(false);
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [confirmDeleteLocationId, setConfirmDeleteLocationId] = useState<string | null>(null);
+  const [newLocationDraft, setNewLocationDraft] = useState({
+    country: 'Rwanda',
+    province: 'Southern Province',
+    district: '',
+    sectorsText: '',
+    fee: 3500,
+    estimatedHours: '2 - 4 hours',
+    mode: 'delivery' as 'delivery' | 'pickup' | 'diaspora',
+    isActive: true
+  });
+  const [editLocationDraft, setEditLocationDraft] = useState({
+    country: 'Rwanda',
+    province: '',
+    district: '',
+    sectorsText: '',
+    fee: 0,
+    estimatedHours: '',
+    mode: 'delivery' as 'delivery' | 'pickup' | 'diaspora'
+  });
+
+  const isQuestionMsg = (m: ChatMessage): boolean => {
+    if (m.messageType === 'question') return true;
+    if (m.messageType === 'answer' || m.messageType === 'reply' || m.messageType === 'message') return false;
+    return Boolean(
+      m.senderRole === 'customer' &&
+        !m.replyTo &&
+        (m.status === 'pending' || m.status === 'answered' || m.content.trim().endsWith('?'))
+    );
+  };
 
   // Sync activeTab when initialTab prop changes
   React.useEffect(() => {
@@ -573,8 +624,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('locations')}
+            className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 whitespace-nowrap shrink-0 transition-colors cursor-pointer flex items-center gap-2 ${
+              activeTab === 'locations'
+                ? 'border-emerald-700 text-emerald-800'
+                : 'border-transparent text-stone-500 hover:text-stone-800'
+            }`}
+          >
+            <MapPin className="w-4 h-4 text-emerald-700" />
+            <span>Country Locations ({locations.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('chat')}
-            className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-2 ${
+            className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 whitespace-nowrap shrink-0 transition-colors cursor-pointer flex items-center gap-2 ${
               activeTab === 'chat'
                 ? 'border-amber-500 text-amber-950 font-black'
                 : 'border-transparent text-stone-500 hover:text-stone-800'
@@ -582,7 +645,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           >
             <MessageSquare className="w-4 h-4 text-amber-600" />
             <span>Customer Support Chat</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-100 text-amber-900 border border-amber-300">
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-100 text-amber-900 border border-amber-300 tabular-nums">
               {latestMessages.length}
             </span>
           </button>
@@ -2206,40 +2269,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {/* 4 Metric Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-2xs">
-                  <div className="text-[11px] font-bold text-stone-500 uppercase tracking-wider">Total Support Messages</div>
-                  <div className="text-2xl font-black text-stone-900 mt-1">{latestMessages.length}</div>
-                  <span className="text-[10px] text-stone-400">Shared in Public Support Feed</span>
+                  <div className="text-[11px] font-bold text-stone-500 uppercase tracking-wider">Total Public Messages</div>
+                  <div className="text-2xl font-black text-stone-900 mt-1 tabular-nums">{latestMessages.length}</div>
+                  <span className="text-[10px] text-stone-400">Visible to anyone who joins</span>
                 </div>
 
                 <div className="bg-white p-4 rounded-2xl border border-amber-300 bg-amber-50/40 shadow-2xs">
                   <div className="text-[11px] font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1">
-                    <span>⏳ Awaiting Reply</span>
+                    <span>Questions Pending</span>
                   </div>
-                  <div className="text-2xl font-black text-amber-900 mt-1">
-                    {latestMessages.filter(m => (m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer'))).length}
+                  <div className="text-2xl font-black text-amber-900 mt-1 tabular-nums">
+                    {latestMessages.filter(m => isQuestionMsg(m) && m.status !== 'answered').length}
                   </div>
-                  <span className="text-[10px] text-amber-800">Customer questions needing answers</span>
+                  <span className="text-[10px] text-amber-800">Only Admin can answer questions</span>
                 </div>
 
                 <div className="bg-white p-4 rounded-2xl border border-emerald-300 bg-emerald-50/40 shadow-2xs">
                   <div className="text-[11px] font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Answered by Admin</span>
+                    <span>Answered Questions</span>
                   </div>
-                  <div className="text-2xl font-black text-emerald-900 mt-1">
-                    {latestMessages.filter(m => m.status === 'answered' || m.isOfficialReply).length}
+                  <div className="text-2xl font-black text-emerald-900 mt-1 tabular-nums">
+                    {latestMessages.filter(m => isQuestionMsg(m) && m.status === 'answered').length}
                   </div>
-                  <span className="text-[10px] text-emerald-800">Resolved customer questions</span>
+                  <span className="text-[10px] text-emerald-800">Resolved by Admin</span>
                 </div>
 
                 <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-2xs">
                   <div className="text-[11px] font-bold text-stone-500 uppercase tracking-wider flex items-center gap-1">
-                    <span>👑 Official Replies</span>
+                    <span>Admin Answers Posted</span>
                   </div>
-                  <div className="text-2xl font-black text-stone-900 mt-1">
-                    {latestMessages.filter(m => m.isOfficialReply).length}
+                  <div className="text-2xl font-black text-stone-900 mt-1 tabular-nums">
+                    {latestMessages.filter(m => m.messageType === 'answer' || Boolean(m.isOfficialReply)).length}
                   </div>
-                  <span className="text-[10px] text-stone-400">Published by Administrator</span>
+                  <span className="text-[10px] text-stone-400">Official answers published</span>
                 </div>
               </div>
 
@@ -2266,43 +2329,54 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+                <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end flex-wrap">
                   <button
                     onClick={() => setChatFilter('all')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap tabular-nums ${
                       chatFilter === 'all'
                         ? 'bg-emerald-800 text-white shadow-2xs'
                         : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
                     }`}
                   >
-                    All Messages ({latestMessages.length})
+                    All ({latestMessages.length})
+                  </button>
+
+                  <button
+                    onClick={() => setChatFilter('questions')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap tabular-nums ${
+                      chatFilter === 'questions'
+                        ? 'bg-stone-800 text-white shadow-2xs'
+                        : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                    }`}
+                  >
+                    Questions ({latestMessages.filter(m => isQuestionMsg(m)).length})
                   </button>
 
                   <button
                     onClick={() => setChatFilter('pending')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap tabular-nums ${
                       chatFilter === 'pending'
                         ? 'bg-amber-600 text-white shadow-2xs'
                         : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
                     }`}
                   >
-                    <span>⏳ Awaiting Reply</span>
+                    <span>Pending</span>
                     <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-200 text-amber-950">
-                      {latestMessages.filter(m => (m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer'))).length}
+                      {latestMessages.filter(m => isQuestionMsg(m) && m.status !== 'answered').length}
                     </span>
                   </button>
 
                   <button
                     onClick={() => setChatFilter('answered')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap tabular-nums ${
                       chatFilter === 'answered'
                         ? 'bg-emerald-700 text-white shadow-2xs'
                         : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
                     }`}
                   >
-                    <span>✅ Answered</span>
+                    <span>Answered</span>
                     <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-emerald-200 text-emerald-950">
-                      {latestMessages.filter(m => m.status === 'answered' || m.isOfficialReply).length}
+                      {latestMessages.filter(m => (isQuestionMsg(m) && m.status === 'answered') || m.messageType === 'answer' || Boolean(m.isOfficialReply)).length}
                     </span>
                   </button>
                 </div>
@@ -2312,12 +2386,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="space-y-3">
                 {(() => {
                   const filtered = latestMessages.filter(m => {
-                    if (chatFilter === 'pending') {
-                      if (!(m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer'))) {
-                        return false;
-                      }
+                    if (chatFilter === 'questions') {
+                      if (!isQuestionMsg(m)) return false;
+                    } else if (chatFilter === 'pending') {
+                      if (!(isQuestionMsg(m) && m.status !== 'answered')) return false;
                     } else if (chatFilter === 'answered') {
-                      if (!(m.status === 'answered' || m.isOfficialReply)) {
+                      if (!((isQuestionMsg(m) && m.status === 'answered') || m.messageType === 'answer' || Boolean(m.isOfficialReply))) {
                         return false;
                       }
                     }
@@ -2337,15 +2411,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <MessageSquare className="w-10 h-10 text-stone-300 mx-auto mb-2" />
                         <h4 className="font-extrabold text-stone-800 text-sm">No Messages Found</h4>
                         <p className="text-xs text-stone-500 mt-1">
-                          {chatSearch ? `No messages matching "${chatSearch}".` : 'No customer support questions currently matching this filter.'}
+                          {chatSearch ? `No messages matching "${chatSearch}".` : 'No support questions or messages currently matching this filter.'}
                         </p>
                       </div>
                     );
                   }
 
                   return filtered.map((msg) => {
-                    const isOfficial = msg.isOfficialReply || (msg.senderRole === 'admin' && Boolean(msg.replyTo));
-                    const isCustomer = msg.senderRole === 'customer' && !msg.replyTo;
+                    const isOfficial = msg.messageType === 'answer' || Boolean(msg.isOfficialReply) || (msg.senderRole === 'admin' && Boolean(msg.replyTo));
+                    const isQuestion = isQuestionMsg(msg);
+                    const isReply = !isOfficial && (msg.messageType === 'reply' || Boolean(msg.replyTo));
+                    const isInlineOpen = inlineReplyTargetId === msg.id;
 
                     return (
                       <div
@@ -2353,7 +2429,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         className={`bg-white rounded-2xl p-4 border transition-all shadow-2xs ${
                           isOfficial 
                             ? 'border-amber-400 bg-amber-50/20' 
-                            : isCustomer && msg.status !== 'answered' 
+                            : isQuestion && msg.status !== 'answered' 
                               ? 'border-amber-300 bg-amber-50/10' 
                               : 'border-stone-200 hover:border-emerald-300'
                         }`}
@@ -2361,14 +2437,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                           
                           {/* Sender Info & Badges */}
-                          <div className="flex items-start gap-3 min-w-0">
+                          <div className="flex items-start gap-3 min-w-0 flex-1">
                             <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs mt-0.5 ${
                               isOfficial ? 'bg-amber-500 text-stone-950 font-black' : 'bg-stone-800 text-white'
                             }`}>
                               {msg.senderName.charAt(0)}
                             </div>
 
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-extrabold text-sm text-stone-900">{msg.senderName}</span>
                                 
@@ -2376,13 +2452,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   {msg.senderRole.replace(/_/g, ' ')}
                                 </span>
 
+                                <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-stone-50 text-stone-600 border border-stone-200">
+                                  #{msg.channelId || 'general'}
+                                </span>
+
                                 {isOfficial && (
                                   <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-stone-950 border border-amber-500 uppercase shadow-2xs flex items-center gap-1">
-                                    <span>👑 Official Admin Reply</span>
+                                    <span>Admin Answer</span>
                                   </span>
                                 )}
 
-                                {isCustomer && (
+                                {isQuestion && (
                                   msg.status === 'answered' ? (
                                     <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
                                       <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -2390,9 +2470,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                     </span>
                                   ) : (
                                     <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
-                                      <span>⏳ Awaiting Admin Reply</span>
+                                      <span>Question Pending</span>
                                     </span>
                                   )
+                                )}
+
+                                {isReply && (
+                                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 border border-stone-300">
+                                    Community Reply
+                                  </span>
                                 )}
 
                                 <span className="text-[11px] text-stone-400 font-mono">{msg.timeFormatted || 'Recent'}</span>
@@ -2400,9 +2486,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                               {/* Quoted question if this is a reply */}
                               {msg.replyTo && (
-                                <div className="mt-1.5 p-2 rounded-xl bg-amber-100/70 border-l-3 border-amber-500 text-xs text-amber-950 flex items-center gap-1.5">
+                                <div className="mt-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50/90 border border-amber-200 text-xs text-amber-950 flex items-center gap-1.5">
                                   <CornerDownRight className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                                  <span className="font-black">{msg.replyTo.senderName}:</span>
+                                  <span className="font-black shrink-0">{msg.replyTo.senderName}:</span>
                                   <span className="italic truncate">{msg.replyTo.content}</span>
                                 </div>
                               )}
@@ -2432,35 +2518,110 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   <span className="text-emerald-700 font-mono font-bold">{msg.productTag.price.toLocaleString()} FRW</span>
                                 </div>
                               )}
+
+                              {/* Inline Admin Answer Composer */}
+                              {isInlineOpen && (
+                                <form
+                                  onSubmit={async (e) => {
+                                    e.preventDefault();
+                                    setIsSubmittingReply(true);
+                                    setInlineReplyError(null);
+                                    const result = await postOfficialAdminReply(msg, inlineReplyText);
+                                    setIsSubmittingReply(false);
+                                    if (result.ok) {
+                                      setInlineReplyText('');
+                                      setInlineReplyTargetId(null);
+                                    } else {
+                                      setInlineReplyError(result.error || 'Could not post Admin answer.');
+                                    }
+                                  }}
+                                  className="mt-3 p-3 rounded-xl bg-amber-50/70 border border-amber-300 space-y-2"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-bold text-amber-950">
+                                      {isQuestion
+                                        ? `Post Official Admin Answer to ${msg.senderName}`
+                                        : `Post Admin Reply to ${msg.senderName}`}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setInlineReplyTargetId(null);
+                                        setInlineReplyText('');
+                                        setInlineReplyError(null);
+                                      }}
+                                      className="text-xs text-stone-500 hover:text-stone-800 font-bold cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                  {inlineReplyError && (
+                                    <p className="text-[11px] font-bold text-rose-700">{inlineReplyError}</p>
+                                  )}
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={inlineReplyText}
+                                      onChange={(e) => setInlineReplyText(e.target.value)}
+                                      placeholder="Write your official Admin answer..."
+                                      autoFocus
+                                      className="flex-1 bg-white border border-amber-300 rounded-xl px-3 py-1.5 text-xs text-stone-900 outline-hidden focus:border-emerald-600"
+                                    />
+                                    <button
+                                      type="submit"
+                                      disabled={!inlineReplyText.trim() || isSubmittingReply}
+                                      className="px-3.5 py-1.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-45 text-white font-bold rounded-xl text-xs cursor-pointer whitespace-nowrap shrink-0"
+                                    >
+                                      {isSubmittingReply ? 'Posting...' : 'Publish Answer'}
+                                    </button>
+                                  </div>
+                                </form>
+                              )}
                             </div>
                           </div>
 
                           {/* Action Buttons for Administrator */}
-                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-start">
-                            {isCustomer && (
+                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-start flex-wrap">
+                            {!isOfficial && (
                               <button
+                                type="button"
                                 onClick={() => {
-                                  openChatForResponse({
-                                    channelId: msg.channelId,
-                                    prefillReply: `@${msg.senderName} `
-                                  });
-                                  if (onOpenCommunityChat) {
-                                    onClose();
-                                    onOpenCommunityChat();
-                                  }
+                                  setInlineReplyTargetId(isInlineOpen ? null : msg.id);
+                                  setInlineReplyText('');
+                                  setInlineReplyError(null);
                                 }}
-                                className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
-                                title="Reply as Administrator in live chat"
+                                className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer whitespace-nowrap"
+                                title="Answer directly as Admin"
                               >
                                 <Reply className="w-3.5 h-3.5" />
-                                <span>Reply as Admin</span>
+                                <span>{isQuestion ? 'Answer Question' : 'Reply as Admin'}</span>
                               </button>
                             )}
 
-                            {isCustomer && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                openChatForResponse({
+                                  channelId: msg.channelId,
+                                  replyToMessage: msg
+                                });
+                                if (onOpenCommunityChat) {
+                                  onClose();
+                                  onOpenCommunityChat();
+                                }
+                              }}
+                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
+                              title="Open this thread inside the Live Chat modal"
+                            >
+                              <MessageSquare className="w-3 h-3" />
+                              <span>Live Chat</span>
+                            </button>
+
+                            {isQuestion && (
                               <button
+                                type="button"
                                 onClick={() => updateMessageStatus(msg.id, msg.status === 'answered' ? 'pending' : 'answered')}
-                                className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                                className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
                                 title="Toggle resolution status"
                               >
                                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -2468,17 +2629,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               </button>
                             )}
 
-                            <button
-                              onClick={() => {
-                                if (window.confirm(`Permanently delete this message from ${msg.senderName}?`)) {
-                                  deleteMessage(msg.id);
-                                }
-                              }}
-                              className="p-1.5 hover:bg-rose-100 text-rose-700 rounded-xl text-xs transition-colors cursor-pointer border border-rose-200"
-                              title="Delete this message (Moderation)"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {confirmDeleteMsgId === msg.id ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    deleteMessage(msg.id);
+                                    setConfirmDeleteMsgId(null);
+                                  }}
+                                  className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs cursor-pointer whitespace-nowrap"
+                                >
+                                  Confirm Delete
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteMsgId(null)}
+                                  className="px-2 py-1.5 bg-stone-200 text-stone-700 font-bold rounded-xl text-xs cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteMsgId(msg.id)}
+                                className="p-1.5 hover:bg-rose-100 text-rose-700 rounded-xl text-xs transition-colors cursor-pointer border border-rose-200"
+                                title="Delete this message (Moderation)"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
 
                         </div>
@@ -2488,6 +2668,542 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 })()}
               </div>
 
+            </div>
+          )}
+
+          {/* TAB 8: COUNTRY DELIVERY LOCATIONS MANAGER */}
+          {activeTab === 'locations' && (
+            <div className="space-y-6">
+              {/* Top Action Header */}
+              <div className="bg-white p-5 rounded-2xl border border-stone-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-stone-900">
+                    Country Delivery Locations &amp; Coverage
+                  </h3>
+                  <p className="text-xs text-stone-600 mt-0.5">
+                    Add districts, provinces, pickup hubs, or cross-border delivery zones. Active locations update checkout, store delivery rates, and Access Anywhere immediately.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocationFormError(null);
+                    setIsAddLocationOpen((prev) => !prev);
+                  }}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{isAddLocationOpen ? 'Hide Location Form' : 'Add Location'}</span>
+                </button>
+              </div>
+
+              {/* 4 Clean KPI Metrics */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-white p-4 rounded-2xl border border-stone-200">
+                  <div className="text-xs font-semibold text-stone-500">Total Locations</div>
+                  <div className="text-2xl font-bold text-stone-900 mt-1 tabular-nums">{locations.length}</div>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-stone-200">
+                  <div className="text-xs font-semibold text-stone-500">Active Zones</div>
+                  <div className="text-2xl font-bold text-emerald-700 mt-1 tabular-nums">
+                    {locations.filter(l => l.isActive).length}
+                  </div>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-stone-200">
+                  <div className="text-xs font-semibold text-stone-500">Sectors &amp; Hubs</div>
+                  <div className="text-2xl font-bold text-stone-900 mt-1 tabular-nums">
+                    {locations.reduce((acc, l) => acc + l.sectors.length, 0)}
+                  </div>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-stone-200">
+                  <div className="text-xs font-semibold text-stone-500">Countries Covered</div>
+                  <div className="text-2xl font-bold text-stone-900 mt-1 tabular-nums">
+                    {new Set(locations.map(l => l.country)).size}
+                  </div>
+                </div>
+              </div>
+
+              {/* Add New Country Location Form */}
+              {isAddLocationOpen && (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setLocationFormError(null);
+                    const sectorsList = newLocationDraft.sectorsText
+                      .split(',')
+                      .map(s => s.trim())
+                      .filter(Boolean);
+
+                    if (!newLocationDraft.district.trim()) {
+                      setLocationFormError('Enter a district, city, or zone name.');
+                      return;
+                    }
+                    if (sectorsList.length === 0) {
+                      setLocationFormError('Enter at least one sector, neighborhood, or hub (comma-separated).');
+                      return;
+                    }
+
+                    setIsSavingLocation(true);
+                    try {
+                      await onAddLocation?.({
+                        country: newLocationDraft.country.trim() || 'Rwanda',
+                        province: newLocationDraft.province.trim() || 'Regional Zone',
+                        district: newLocationDraft.district.trim(),
+                        sectors: sectorsList,
+                        fee: Math.max(0, Number(newLocationDraft.fee) || 0),
+                        estimatedHours: newLocationDraft.estimatedHours.trim() || '2 - 4 hours',
+                        mode: newLocationDraft.mode,
+                        isActive: newLocationDraft.isActive
+                      });
+                      setNewLocationDraft({
+                        country: 'Rwanda',
+                        province: 'Southern Province',
+                        district: '',
+                        sectorsText: '',
+                        fee: 3500,
+                        estimatedHours: '2 - 4 hours',
+                        mode: 'delivery',
+                        isActive: true
+                      });
+                      setIsAddLocationOpen(false);
+                    } catch (err: any) {
+                      setLocationFormError(err?.message || 'Failed to add country location');
+                    } finally {
+                      setIsSavingLocation(false);
+                    }
+                  }}
+                  className="bg-white p-5 rounded-2xl border border-emerald-300 space-y-4 text-xs"
+                >
+                  <div className="flex items-center justify-between border-b border-stone-200 pb-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-stone-900">Register New Country Location</h4>
+                      <p className="text-xs text-stone-500 mt-0.5">
+                        Specify the country, province/region, district or city name, and covered sectors or hubs.
+                      </p>
+                    </div>
+                  </div>
+
+                  {locationFormError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 font-medium">
+                      {locationFormError}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block font-semibold text-stone-700 mb-1">Country *</label>
+                      <input
+                        type="text"
+                        list="country-presets"
+                        required
+                        value={newLocationDraft.country}
+                        onChange={(e) => setNewLocationDraft({ ...newLocationDraft, country: e.target.value })}
+                        placeholder="e.g. Rwanda"
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white"
+                      />
+                      <datalist id="country-presets">
+                        <option value="Rwanda" />
+                        <option value="Uganda" />
+                        <option value="Kenya" />
+                        <option value="Burundi" />
+                        <option value="Tanzania" />
+                        <option value="DRC" />
+                      </datalist>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-stone-700 mb-1">Province / Region *</label>
+                      <input
+                        type="text"
+                        list="province-presets"
+                        required
+                        value={newLocationDraft.province}
+                        onChange={(e) => setNewLocationDraft({ ...newLocationDraft, province: e.target.value })}
+                        placeholder="e.g. Southern Province"
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white"
+                      />
+                      <datalist id="province-presets">
+                        <option value="Kigali City" />
+                        <option value="Northern Province" />
+                        <option value="Southern Province" />
+                        <option value="Eastern Province" />
+                        <option value="Western Province" />
+                        <option value="Pickup Hubs" />
+                        <option value="International / Diaspora" />
+                      </datalist>
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-stone-700 mb-1">District / City Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={newLocationDraft.district}
+                        onChange={(e) => setNewLocationDraft({ ...newLocationDraft, district: e.target.value })}
+                        placeholder="e.g. Kamonyi or Bugesera"
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-stone-700 mb-1">
+                      Sectors / Towns / Pickup Hubs (comma-separated) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newLocationDraft.sectorsText}
+                      onChange={(e) => setNewLocationDraft({ ...newLocationDraft, sectorsText: e.target.value })}
+                      placeholder="e.g. Kamonyi Centre, Runda, Gihara, Mugina"
+                      className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block font-semibold text-stone-700 mb-1">Delivery Fee (FRW) *</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={100}
+                        required
+                        value={newLocationDraft.fee}
+                        onChange={(e) => setNewLocationDraft({ ...newLocationDraft, fee: Number(e.target.value) })}
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white tabular-nums"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-stone-700 mb-1">Estimated Delivery Window *</label>
+                      <input
+                        type="text"
+                        required
+                        value={newLocationDraft.estimatedHours}
+                        onChange={(e) => setNewLocationDraft({ ...newLocationDraft, estimatedHours: e.target.value })}
+                        placeholder="e.g. 2 - 4 hours"
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-stone-700 mb-1">Fulfillment Mode *</label>
+                      <select
+                        value={newLocationDraft.mode}
+                        onChange={(e) => setNewLocationDraft({ ...newLocationDraft, mode: e.target.value as 'delivery' | 'pickup' | 'diaspora' })}
+                        className="w-full px-3 py-2 border border-stone-300 rounded-xl bg-white cursor-pointer"
+                      >
+                        <option value="delivery">Direct Delivery</option>
+                        <option value="pickup">Cold Pickup Hub</option>
+                        <option value="diaspora">Diaspora / Cross-Border</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddLocationOpen(false);
+                        setLocationFormError(null);
+                      }}
+                      className="px-4 py-2 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-100 font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingLocation}
+                      className="px-5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSavingLocation ? 'Saving...' : 'Save Location'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Search & Filter Toolbar */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-stone-200">
+                <div className="relative w-full sm:w-80">
+                  <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search country, province, district, or sector..."
+                    value={locationSearch}
+                    onChange={(e) => setLocationSearch(e.target.value)}
+                    className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-3 py-1.5 text-xs outline-hidden focus:border-emerald-500 focus:bg-white"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap justify-end w-full sm:w-auto">
+                  {(['all', 'delivery', 'pickup', 'diaspora'] as const).map((modeKey) => (
+                    <button
+                      key={modeKey}
+                      type="button"
+                      onClick={() => setLocationModeFilter(modeKey)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold capitalize whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                        locationModeFilter === modeKey
+                          ? 'bg-emerald-800 text-white'
+                          : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                      }`}
+                    >
+                      {modeKey === 'all' ? 'All Modes' : modeKey}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Locations Directory */}
+              {(() => {
+                const filteredLocs = locations.filter((loc) => {
+                  if (locationModeFilter !== 'all' && loc.mode !== locationModeFilter) {
+                    return false;
+                  }
+                  if (locationSearch.trim()) {
+                    const q = locationSearch.toLowerCase();
+                    const matchesCountry = loc.country.toLowerCase().includes(q);
+                    const matchesProvince = loc.province.toLowerCase().includes(q);
+                    const matchesDistrict = loc.district.toLowerCase().includes(q);
+                    const matchesSector = loc.sectors.some(s => s.toLowerCase().includes(q));
+                    if (!matchesCountry && !matchesProvince && !matchesDistrict && !matchesSector) {
+                      return false;
+                    }
+                  }
+                  return true;
+                });
+
+                if (filteredLocs.length === 0) {
+                  return (
+                    <div className="bg-white p-10 rounded-2xl border border-stone-200 text-center space-y-3">
+                      <p className="text-sm font-semibold text-stone-800">No country locations match your filter.</p>
+                      <p className="text-xs text-stone-500">Clear your search or add a new delivery district or city.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLocationSearch('');
+                          setLocationModeFilter('all');
+                          setIsAddLocationOpen(true);
+                        }}
+                        className="px-4 py-2 rounded-xl bg-emerald-800 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                      >
+                        Add Location
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="bg-white rounded-2xl border border-stone-200 divide-y divide-stone-200 overflow-hidden">
+                    {filteredLocs.map((loc) => {
+                      const isEditing = editingLocationId === loc.id;
+                      return (
+                        <div key={loc.id} className="p-4 sm:p-5 hover:bg-stone-50/60 transition-colors">
+                          {isEditing ? (
+                            <div className="space-y-3 text-xs">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block font-semibold text-stone-700 mb-1">Country</label>
+                                  <input
+                                    type="text"
+                                    value={editLocationDraft.country}
+                                    onChange={(e) => setEditLocationDraft({ ...editLocationDraft, country: e.target.value })}
+                                    className="w-full px-3 py-1.5 border border-stone-300 rounded-xl bg-white"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block font-semibold text-stone-700 mb-1">Province / Region</label>
+                                  <input
+                                    type="text"
+                                    value={editLocationDraft.province}
+                                    onChange={(e) => setEditLocationDraft({ ...editLocationDraft, province: e.target.value })}
+                                    className="w-full px-3 py-1.5 border border-stone-300 rounded-xl bg-white"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block font-semibold text-stone-700 mb-1">District / City</label>
+                                  <input
+                                    type="text"
+                                    value={editLocationDraft.district}
+                                    onChange={(e) => setEditLocationDraft({ ...editLocationDraft, district: e.target.value })}
+                                    className="w-full px-3 py-1.5 border border-stone-300 rounded-xl bg-white"
+                                  />
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block font-semibold text-stone-700 mb-1">Sectors / Cities / Hubs (comma-separated)</label>
+                                <input
+                                  type="text"
+                                  value={editLocationDraft.sectorsText}
+                                  onChange={(e) => setEditLocationDraft({ ...editLocationDraft, sectorsText: e.target.value })}
+                                  className="w-full px-3 py-1.5 border border-stone-300 rounded-xl bg-white"
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block font-semibold text-stone-700 mb-1">Fee (FRW)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={100}
+                                    value={editLocationDraft.fee}
+                                    onChange={(e) => setEditLocationDraft({ ...editLocationDraft, fee: Number(e.target.value) })}
+                                    className="w-full px-3 py-1.5 border border-stone-300 rounded-xl bg-white tabular-nums"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block font-semibold text-stone-700 mb-1">Estimated Window</label>
+                                  <input
+                                    type="text"
+                                    value={editLocationDraft.estimatedHours}
+                                    onChange={(e) => setEditLocationDraft({ ...editLocationDraft, estimatedHours: e.target.value })}
+                                    className="w-full px-3 py-1.5 border border-stone-300 rounded-xl bg-white"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block font-semibold text-stone-700 mb-1">Mode</label>
+                                  <select
+                                    value={editLocationDraft.mode}
+                                    onChange={(e) => setEditLocationDraft({ ...editLocationDraft, mode: e.target.value as 'delivery' | 'pickup' | 'diaspora' })}
+                                    className="w-full px-3 py-1.5 border border-stone-300 rounded-xl bg-white cursor-pointer"
+                                  >
+                                    <option value="delivery">Direct Delivery</option>
+                                    <option value="pickup">Cold Pickup Hub</option>
+                                    <option value="diaspora">Diaspora / Cross-Border</option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingLocationId(null)}
+                                  className="px-3 py-1.5 rounded-xl border border-stone-300 text-stone-700 font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    const sectorsList = editLocationDraft.sectorsText
+                                      .split(',')
+                                      .map(s => s.trim())
+                                      .filter(Boolean);
+                                    if (!editLocationDraft.district.trim() || sectorsList.length === 0) return;
+                                    await onUpdateLocation?.(loc.id, {
+                                      country: editLocationDraft.country.trim() || 'Rwanda',
+                                      province: editLocationDraft.province.trim() || 'Regional Zone',
+                                      district: editLocationDraft.district.trim(),
+                                      sectors: sectorsList,
+                                      fee: Math.max(0, Number(editLocationDraft.fee) || 0),
+                                      estimatedHours: editLocationDraft.estimatedHours.trim() || '2 - 4 hours',
+                                      mode: editLocationDraft.mode
+                                    });
+                                    setEditingLocationId(null);
+                                  }}
+                                  className="px-4 py-1.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                                >
+                                  Save Changes
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                              <div className="space-y-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-sm font-bold text-stone-900">{loc.district}</span>
+                                  <span className="text-xs text-stone-500">
+                                    {loc.province} · {loc.country} · <span className="capitalize">{loc.mode}</span>
+                                  </span>
+                                  <span className={`text-xs font-semibold ${loc.isActive ? 'text-emerald-700' : 'text-stone-400'}`}>
+                                    {loc.isActive ? 'Active' : 'Disabled'}
+                                  </span>
+                                </div>
+
+                                <p className="text-xs text-stone-600 leading-relaxed">
+                                  Sectors / Hubs ({loc.sectors.length}): {loc.sectors.join(', ')}
+                                </p>
+
+                                <div className="flex flex-wrap items-center gap-4 text-xs text-stone-500 tabular-nums">
+                                  <span>
+                                    Fee: <strong className="text-stone-900">{loc.fee === 0 ? '0 FRW (Free)' : `${loc.fee.toLocaleString()} FRW`}</strong>
+                                  </span>
+                                  <span>ETA: <strong className="text-stone-900">{loc.estimatedHours}</strong></span>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => onUpdateLocation?.(loc.id, { isActive: !loc.isActive })}
+                                  className={`px-3 py-1.5 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                                    loc.isActive
+                                      ? 'border-stone-300 bg-white hover:bg-stone-100 text-stone-700'
+                                      : 'border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800'
+                                  }`}
+                                >
+                                  {loc.isActive ? 'Disable' : 'Enable'}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingLocationId(loc.id);
+                                    setEditLocationDraft({
+                                      country: loc.country,
+                                      province: loc.province,
+                                      district: loc.district,
+                                      sectorsText: loc.sectors.join(', '),
+                                      fee: loc.fee,
+                                      estimatedHours: loc.estimatedHours,
+                                      mode: loc.mode
+                                    });
+                                  }}
+                                  className="px-3 py-1.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-stone-800 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                                >
+                                  Edit
+                                </button>
+
+                                {confirmDeleteLocationId === loc.id ? (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        await onDeleteLocation?.(loc.id);
+                                        setConfirmDeleteLocationId(null);
+                                      }}
+                                      className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer"
+                                    >
+                                      Confirm
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteLocationId(null)}
+                                      className="px-2.5 py-1.5 rounded-xl bg-stone-200 text-stone-700 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteLocationId(loc.id)}
+                                    className="px-3 py-1.5 rounded-xl border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                                  >
+                                    Remove
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 

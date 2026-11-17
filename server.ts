@@ -291,7 +291,7 @@ async function startServer() {
     res.json([]);
   });
 
-  // Delivery Zones from Cloud SQL
+  // Delivery Zones from Cloud SQL (falling back to persisted country locations)
   api.get('/delivery-zones', async (req: Request, res: Response) => {
     try {
       const zones = await getDeliveryZonesFromDb();
@@ -299,7 +299,108 @@ async function startServer() {
     } catch (e) {
       console.warn('Cloud SQL delivery zones fallback:', e);
     }
-    res.json([]);
+    res.json(db.getLocations(true));
+  });
+
+  // Country Delivery Locations (Admin CRUD + Storefront Read)
+  api.get('/locations', (req: Request, res: Response) => {
+    const activeOnly = req.query.activeOnly === 'true';
+    res.json(db.getLocations(activeOnly));
+  });
+
+  api.post('/locations', (req: Request, res: Response) => {
+    const role = String(req.headers['x-user-role'] || req.body?.role || 'customer').toLowerCase();
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only administrators can add country delivery locations' });
+    }
+
+    const { country, province, district, sectors, fee, estimatedHours, mode, isActive } = req.body || {};
+    const cleanDistrict = String(district || '').trim();
+    if (!cleanDistrict) {
+      return res.status(400).json({ error: 'Location district / city name is required' });
+    }
+
+    const parsedSectors: string[] = Array.isArray(sectors)
+      ? sectors.map((s: any) => String(s).trim()).filter(Boolean)
+      : String(sectors || '')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean);
+
+    if (parsedSectors.length === 0) {
+      return res.status(400).json({ error: 'Provide at least one sector, city, or hub name' });
+    }
+
+    const existing = db.getLocations().find(
+      l => l.district.toLowerCase() === cleanDistrict.toLowerCase() &&
+           l.country.toLowerCase() === String(country || 'Rwanda').trim().toLowerCase()
+    );
+    if (existing) {
+      return res.status(409).json({ error: `Location "${cleanDistrict}" already exists in ${existing.country}` });
+    }
+
+    const allowedMode = mode === 'pickup' || mode === 'diaspora' ? mode : 'delivery';
+    const created = db.addLocation({
+      country: String(country || 'Rwanda').trim() || 'Rwanda',
+      province: String(province || 'Regional Hub').trim() || 'Regional Hub',
+      district: cleanDistrict,
+      sectors: parsedSectors,
+      fee: Math.max(0, Number(fee) || 0),
+      estimatedHours: String(estimatedHours || '2 - 4 hours').trim() || '2 - 4 hours',
+      mode: allowedMode,
+      isActive: isActive !== false
+    });
+
+    res.status(201).json(created);
+  });
+
+  api.put('/locations/:id', (req: Request, res: Response) => {
+    const role = String(req.headers['x-user-role'] || req.body?.role || 'customer').toLowerCase();
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only administrators can edit country delivery locations' });
+    }
+
+    const { country, province, district, sectors, fee, estimatedHours, mode, isActive } = req.body || {};
+    const updates: any = {};
+    if (country !== undefined) updates.country = String(country).trim();
+    if (province !== undefined) updates.province = String(province).trim();
+    if (district !== undefined) {
+      const clean = String(district).trim();
+      if (!clean) return res.status(400).json({ error: 'Location district / city name cannot be empty' });
+      updates.district = clean;
+    }
+    if (sectors !== undefined) {
+      const parsedSectors: string[] = Array.isArray(sectors)
+        ? sectors.map((s: any) => String(s).trim()).filter(Boolean)
+        : String(sectors || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (parsedSectors.length === 0) {
+        return res.status(400).json({ error: 'Location must include at least one sector, city, or hub' });
+      }
+      updates.sectors = parsedSectors;
+    }
+    if (fee !== undefined) updates.fee = Math.max(0, Number(fee) || 0);
+    if (estimatedHours !== undefined) updates.estimatedHours = String(estimatedHours).trim();
+    if (mode === 'delivery' || mode === 'pickup' || mode === 'diaspora') updates.mode = mode;
+    if (isActive !== undefined) updates.isActive = Boolean(isActive);
+
+    const updated = db.updateLocation(req.params.id, updates);
+    if (!updated) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+    res.json(updated);
+  });
+
+  api.delete('/locations/:id', (req: Request, res: Response) => {
+    const role = String(req.headers['x-user-role'] || req.query.role || req.body?.role || 'customer').toLowerCase();
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Only administrators can remove country delivery locations' });
+    }
+
+    const ok = db.deleteLocation(req.params.id);
+    if (!ok) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+    res.json({ success: true, id: req.params.id });
   });
 
   // Farm Passports from Cloud SQL
@@ -514,6 +615,8 @@ async function startServer() {
       senderName, 
       senderRole, 
       senderAvatar, 
+      messageType,
+      isOfficialReply,
       content, 
       replyTo, 
       productTag, 
@@ -528,11 +631,6 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing sender info' });
     }
 
-    // REQUIREMENT 3: Only Admin can reply to customer questions
-    if (replyTo && senderRole !== 'admin') {
-      return res.status(403).json({ error: 'Only the Administrator can reply to customer questions in the public customer support chat.' });
-    }
-
     const publicChannelId = typeof channelId === 'string' && !channelId.startsWith('dm:') && channelId.trim()
       ? channelId
       : 'general';
@@ -544,6 +642,8 @@ async function startServer() {
         senderName,
         senderRole: senderRole || 'customer',
         senderAvatar,
+        messageType,
+        isOfficialReply,
         content: content || '',
         reactions: {},
         replyTo,
@@ -556,7 +656,9 @@ async function startServer() {
 
       res.status(201).json(message);
     } catch (err: any) {
-      res.status(400).json({ error: err?.message || 'Failed to save message' });
+      const msgText = err?.message || 'Failed to save message';
+      const isForbidden = msgText.toLowerCase().includes('only the admin');
+      res.status(isForbidden ? 403 : 400).json({ error: msgText });
     }
   });
 

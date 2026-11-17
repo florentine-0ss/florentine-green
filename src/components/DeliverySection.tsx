@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Clock, ShieldCheck, MapPin, Truck, CheckCircle2, ArrowRight } from 'lucide-react';
-import { DeliveryZoneSelection, Language } from '../types';
+import { CountryLocation, DeliveryZoneSelection, Language } from '../types';
 import { TRANSLATIONS } from '../data/translations';
-import { RWANDA_LOCATIONS } from '../data/mockData';
+import { INITIAL_COUNTRY_LOCATIONS } from '../data/mockData';
 
 interface DeliverySectionProps {
   currentLang: Language;
   onShopClick: () => void;
   selectedLocation?: DeliveryZoneSelection;
   onSelectLocation?: (loc: DeliveryZoneSelection) => void;
+  locations?: CountryLocation[];
 }
 
 export const DeliverySection: React.FC<DeliverySectionProps> = ({
@@ -16,12 +17,19 @@ export const DeliverySection: React.FC<DeliverySectionProps> = ({
   onShopClick,
   selectedLocation,
   onSelectLocation,
+  locations,
 }) => {
   const t = TRANSLATIONS[currentLang].delivery;
-  
-  const [selectedDistrict, setSelectedDistrict] = useState(selectedLocation?.district || RWANDA_LOCATIONS[0].district);
-  const currentDistrictData = RWANDA_LOCATIONS.find(d => d.district === selectedDistrict) || RWANDA_LOCATIONS[0];
-  const [selectedSector, setSelectedSector] = useState(selectedLocation?.sector || currentDistrictData.sectors[0]);
+  const availableLocations = locations && locations.length > 0 ? locations : INITIAL_COUNTRY_LOCATIONS;
+
+  const [selectedDistrict, setSelectedDistrict] = useState(
+    selectedLocation?.district || availableLocations[0].district
+  );
+  const currentDistrictData =
+    availableLocations.find(d => d.district === selectedDistrict) || availableLocations[0];
+  const [selectedSector, setSelectedSector] = useState(
+    selectedLocation?.sector || currentDistrictData.sectors[0] || ''
+  );
 
   useEffect(() => {
     if (selectedLocation) {
@@ -30,14 +38,25 @@ export const DeliverySection: React.FC<DeliverySectionProps> = ({
     }
   }, [selectedLocation]);
 
+  useEffect(() => {
+    const matched = availableLocations.find(d => d.district === selectedDistrict);
+    if (!matched && availableLocations.length > 0) {
+      setSelectedDistrict(availableLocations[0].district);
+      setSelectedSector(availableLocations[0].sectors[0] || '');
+    } else if (matched && !matched.sectors.includes(selectedSector)) {
+      setSelectedSector(matched.sectors[0] || '');
+    }
+  }, [availableLocations, selectedDistrict, selectedSector]);
+
   const handleDistrictChange = (districtName: string) => {
     setSelectedDistrict(districtName);
-    const found = RWANDA_LOCATIONS.find(d => d.district === districtName);
+    const found = availableLocations.find(d => d.district === districtName);
     if (found) {
-      setSelectedSector(found.sectors[0]);
+      const firstSector = found.sectors[0] || found.district;
+      setSelectedSector(firstSector);
       onSelectLocation?.({
         district: found.district,
-        sector: found.sectors[0],
+        sector: firstSector,
         fee: found.fee,
         estimatedHours: found.estimatedHours,
         fulfillmentMode: found.mode || 'delivery',
@@ -113,7 +132,7 @@ export const DeliverySection: React.FC<DeliverySectionProps> = ({
                 {t.calcTitle}
               </h3>
               <p className="text-stone-300 text-sm leading-relaxed">
-                We operate refrigerated delivery motorbikes and vans to maintain farm crispness across Kigali's Gasabo, Kicukiro, and Nyarugenge districts.
+                We operate refrigerated delivery motorbikes and vans across Kigali, all provinces, and regional locations configured by Store Admin.
               </p>
               
               <div className="flex items-center gap-2 text-xs text-amber-300 font-semibold bg-emerald-900/60 p-3 rounded-xl border border-emerald-700/50">
@@ -135,9 +154,9 @@ export const DeliverySection: React.FC<DeliverySectionProps> = ({
                     onChange={(e) => handleDistrictChange(e.target.value)}
                     className="w-full bg-stone-50 border border-stone-300 rounded-xl px-3 py-2.5 text-xs sm:text-sm font-medium text-stone-900 focus:outline-emerald-600 cursor-pointer"
                   >
-                    {RWANDA_LOCATIONS.map((loc) => (
-                      <option key={loc.district} value={loc.district}>
-                        {loc.district}
+                    {availableLocations.map((loc) => (
+                      <option key={loc.id || loc.district} value={loc.district}>
+                        {loc.country && loc.country !== 'Rwanda' ? `${loc.district} (${loc.country})` : loc.district}
                       </option>
                     ))}
                   </select>
@@ -171,7 +190,7 @@ export const DeliverySection: React.FC<DeliverySectionProps> = ({
                 </div>
                 <div className="text-right">
                   <div className="text-[11px] text-stone-500 font-semibold">{t.deliveryCost}</div>
-                  <div className="text-lg font-black text-emerald-800 mt-0.5">
+                  <div className="text-lg font-black text-emerald-800 mt-0.5 tabular-nums">
                     {currentDistrictData.fee.toLocaleString()} FRW
                   </div>
                 </div>

@@ -114,6 +114,92 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "title", "type", "status", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Public chat post, customer question, reply, or admin-only official answer",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique chat message identifier"
+        },
+        "channelId": {
+          "type": "string",
+          "enum": ["general", "fresh-harvest", "delivery-kigali", "staff-internal", "staff-support"],
+          "maxLength": 60,
+          "description": "Public channel identifier"
+        },
+        "senderUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Authenticated author Firebase UID"
+        },
+        "senderName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Public display name"
+        },
+        "senderRole": {
+          "type": "string",
+          "enum": ["customer", "admin", "stock_manager", "cashier", "sales_attendant", "accountant"],
+          "description": "Author role"
+        },
+        "messageType": {
+          "type": "string",
+          "enum": ["question", "reply", "answer", "message"],
+          "description": "Distinguishes questions, general replies, messages, and admin-only answers"
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Message body text"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "answered", "open"],
+          "description": "Question resolution state"
+        },
+        "isOfficialReply": {
+          "type": "boolean",
+          "description": "True exclusively for admin answers to questions"
+        },
+        "replyToId": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Referenced parent message ID"
+        },
+        "replyToSenderName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Referenced parent author name"
+        },
+        "replyToContent": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Referenced parent snippet"
+        },
+        "answeredBy": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Admin display name who answered"
+        },
+        "answeredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when answered by admin"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        }
+      },
+      "required": ["id", "channelId", "senderUid", "senderName", "senderRole", "messageType", "content", "isOfficialReply", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -136,6 +222,10 @@
     "/activities/{activityId}": {
       "schema": "Activity",
       "description": "Operational system action audit log"
+    },
+    "/chat_messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Public Q&A and community chat messages where anyone can read/reply/ask questions and only admins can answer questions"
     }
   }
 }

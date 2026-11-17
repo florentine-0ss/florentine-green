@@ -7,19 +7,26 @@ import {
   Phone, PhoneCall, PhoneOff, Video, VideoOff, Mic, MicOff,
   Image as ImageIcon, Paperclip, Play, Pause, Volume2, VolumeX,
   FileText, Camera, HelpCircle, Maximize2, Minimize2, Info,
-  ChevronDown, Check, Download, Trash2, Radio
+  ChevronDown, Check, Download, Trash2, Radio, AlertCircle
 } from 'lucide-react';
 import { 
-  User, Product, ChatMessage, ChatChannel, ChatOnlineUser, 
+  User, Product, ChatMessage, ChatMessageType, ChatChannel, ChatOnlineUser, 
   ChatAttachment, ChatVoiceNote, ChatCallSession, UserRole 
 } from '../types';
 import { useRealtimeCommunity } from '../context/RealtimeCommunityContext';
+import {
+  auth,
+  publishChatMessageToFirestore,
+  updateChatQuestionStatusInFirestore,
+  deleteChatMessageInFirestore,
+} from '../lib/firebase';
 
 interface CommunityChatModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: User | null;
   onOpenAuth: () => void;
+  onQuickJoinCustomer?: (displayName: string) => void;
   availableProducts: Product[];
   joinedUsers: User[];
 }
@@ -79,15 +86,27 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   onClose,
   currentUser,
   onOpenAuth,
+  onQuickJoinCustomer,
   availableProducts,
   joinedUsers
 }) => {
-  const { activeChatTarget, clearActiveChatTarget, onlineUsers: globalOnlineUsers } = useRealtimeCommunity();
+  const {
+    activeChatTarget,
+    clearActiveChatTarget,
+    onlineUsers: globalOnlineUsers,
+    latestMessages: contextLatestMessages,
+    chatError: contextChatError,
+    clearChatError
+  } = useRealtimeCommunity();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string>('general');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [composerMode, setComposerMode] = useState<'question' | 'message'>('question');
+  const [guestNameInput, setGuestNameInput] = useState('');
+  const [localChatError, setLocalChatError] = useState<string | null>(null);
+  const [confirmDeleteMsgId, setConfirmDeleteMsgId] = useState<string | null>(null);
   const [selectedProductToTag, setSelectedProductToTag] = useState<Product | null>(null);
   const [showProductPicker, setShowProductPicker] = useState(false);
   const [memberSearch, setMemberSearch] = useState('');
@@ -96,7 +115,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   const [isTyping, setIsTyping] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'channels' | 'members'>('channels');
-  const [adminFilter, setAdminFilter] = useState<'all' | 'pending' | 'answered'>('all');
+  const [messageFilter, setMessageFilter] = useState<'all' | 'questions' | 'pending' | 'answered'>('all');
 
   // Media & Attachment States
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
@@ -127,6 +146,23 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   const playbackTimerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLInputElement>(null);
+  const lastOptimisticIdRef = useRef<string | null>(null);
+
+  const isQuestionMessage = (msg?: Partial<ChatMessage> | null): boolean => {
+    if (!msg) return false;
+    if (msg.messageType === 'question') return true;
+    if (msg.messageType === 'answer' || msg.messageType === 'reply' || msg.messageType === 'message') {
+      return false;
+    }
+    return Boolean(
+      msg.senderRole === 'customer' &&
+        !msg.replyTo &&
+        (msg.status === 'pending' ||
+          msg.status === 'answered' ||
+          (typeof msg.content === 'string' && msg.content.trim().endsWith('?')))
+    );
+  };
 
   // Auto-scroll to bottom on new messages
   const scrollToBottom = () => {
@@ -137,9 +173,20 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     if (isOpen) {
       scrollToBottom();
     }
-  }, [messages, activeChannelId, isOpen, activeCall]);
+  }, [messages, contextLatestMessages, activeChannelId, isOpen, activeCall]);
 
-  // Handle immediate response targeting from live presence notification toast (always public)
+  // Default composer mode by role & channel
+  useEffect(() => {
+    if (currentUser?.role === 'admin' || (currentUser && currentUser.role !== 'customer')) {
+      setComposerMode('message');
+    } else if (activeChannelId === 'general' || activeChannelId === 'staff-support') {
+      setComposerMode('question');
+    } else {
+      setComposerMode('message');
+    }
+  }, [currentUser, activeChannelId]);
+
+  // Handle immediate response targeting from live presence notification or Admin Panel
   useEffect(() => {
     if (isOpen && activeChatTarget) {
       if (activeChatTarget.channelId) {
@@ -151,19 +198,19 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
         const targetIsStaff = activeChatTarget.user.role !== 'customer' && currentUser && currentUser.role !== 'customer';
         setActiveChannelId(targetIsStaff ? 'staff-internal' : 'general');
       }
+      if (activeChatTarget.replyToMessage) {
+        const targetMsg = activeChatTarget.replyToMessage;
+        if (currentUser?.role === 'admin' || !isQuestionMessage(targetMsg)) {
+          setReplyingTo(targetMsg);
+        }
+      }
       if (activeChatTarget.prefillReply) {
         setInputText(activeChatTarget.prefillReply);
-      } else if (activeChatTarget.user) {
+      } else if (activeChatTarget.user && !activeChatTarget.replyToMessage) {
         setInputText(`@${activeChatTarget.user.userName} `);
       }
       setTimeout(() => {
-        const inputElem = document.querySelector(
-          'input[placeholder*="Ask a question"], input[placeholder*="Message #"], input[placeholder*="Replying"], input[placeholder*="official announcement"]'
-        ) as HTMLInputElement | null;
-        if (inputElem) {
-          inputElem.focus();
-          inputElem.setSelectionRange(inputElem.value.length, inputElem.value.length);
-        }
+        composerInputRef.current?.focus();
       }, 150);
       clearActiveChatTarget();
     }
@@ -339,6 +386,17 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                 setIsTyping(userName);
                 if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
                 typingTimeoutRef.current = setTimeout(() => setIsTyping(null), 2500);
+              }
+              break;
+            }
+
+            case 'chat:error': {
+              const errMsg = data.payload?.message || 'Only the Admin is permitted to provide answers to questions.';
+              setLocalChatError(errMsg);
+              if (lastOptimisticIdRef.current) {
+                const failedId = lastOptimisticIdRef.current;
+                setMessages(prev => prev.filter(m => m.id !== failedId));
+                lastOptimisticIdRef.current = null;
               }
               break;
             }
@@ -547,28 +605,84 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     setCallDuration(0);
   };
 
+  // --- QUICK JOIN HANDLER FOR GUEST VISITORS ---
+  const handleQuickJoinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = guestNameInput.trim();
+    if (!cleaned || !onQuickJoinCustomer) return;
+    onQuickJoinCustomer(cleaned);
+    setGuestNameInput('');
+    setLocalChatError(null);
+    setTimeout(() => {
+      composerInputRef.current?.focus();
+    }, 100);
+  };
+
+  // --- INITIATE REPLY OR QUESTION ANSWER ---
+  const handleInitiateReply = (targetMsg: ChatMessage) => {
+    setLocalChatError(null);
+    if (!currentUser) {
+      setLocalChatError('Please enter your name below or sign in to post questions and replies.');
+      return;
+    }
+
+    const targetIsQuestion = isQuestionMessage(targetMsg);
+    if (targetIsQuestion && currentUser.role !== 'admin') {
+      setLocalChatError('Only the Admin is permitted to provide answers to questions. You can ask a new question or reply to general discussions.');
+      return;
+    }
+
+    setReplyingTo(targetMsg);
+    setTimeout(() => {
+      composerInputRef.current?.focus();
+    }, 80);
+  };
+
   // --- SEND MESSAGE HANDLER ---
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!inputText.trim() && !selectedProductToTag && pendingAttachments.length === 0 && !pendingVoiceNote) return;
 
     if (!currentUser) {
-      onOpenAuth();
+      setLocalChatError('Enter your name below to join the chat or sign in first.');
       return;
     }
 
+    const replyingToQuestion = replyingTo ? isQuestionMessage(replyingTo) : false;
+
+    // Client-side guard matching server & Firestore rules: only Admin can answer questions
+    if (replyingToQuestion && currentUser.role !== 'admin') {
+      setLocalChatError('Only the Admin is permitted to provide answers to questions.');
+      setReplyingTo(null);
+      return;
+    }
+
+    setLocalChatError(null);
+    clearChatError();
+
     const isOfficialReply = currentUser.role === 'admin' && Boolean(replyingTo);
+    const resolvedType: ChatMessageType = isOfficialReply
+      ? 'answer'
+      : replyingTo
+      ? 'reply'
+      : composerMode === 'question'
+      ? 'question'
+      : 'message';
+
     const now = new Date();
+    const optimisticId = `msg-opt-${Date.now()}`;
+    lastOptimisticIdRef.current = optimisticId;
 
     const payload: Partial<ChatMessage> = {
       channelId: currentChannel,
       senderId: currentUser.id,
       senderName: currentUser.name,
       senderRole: currentUser.role,
+      messageType: resolvedType,
       content: inputText.trim() || (pendingVoiceNote ? '🎙️ Voice message' : pendingAttachments.length > 0 ? '📎 Attachment' : ''),
       reactions: {},
       isOfficialReply,
-      status: isOfficialReply ? 'answered' : (currentUser.role === 'customer' ? 'pending' : undefined),
+      status: isOfficialReply ? 'answered' : resolvedType === 'question' ? 'pending' : 'open',
       answeredBy: isOfficialReply ? currentUser.name : undefined,
       answeredAt: isOfficialReply ? now.toISOString() : undefined,
       replyTo: replyingTo ? {
@@ -590,11 +704,12 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
     // Optimistic UI update
     const optimisticMsg: ChatMessage = {
-      id: `msg-opt-${Date.now()}`,
+      id: optimisticId,
       channelId: currentChannel,
       senderId: currentUser.id,
       senderName: currentUser.name,
       senderRole: currentUser.role,
+      messageType: resolvedType,
       content: payload.content || '',
       timestamp: now.toISOString(),
       timeFormatted: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -610,7 +725,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       isDirectMessage: false
     };
 
-    // If Admin is answering a customer question, update the question's status optimistically
+    // If Admin is answering a question, update the parent question's status optimistically
     if (isOfficialReply && replyingTo?.id) {
       setMessages(prev => prev.map(m => m.id === replyingTo.id ? { ...m, status: 'answered', answeredBy: currentUser.name, answeredAt: now.toISOString() } : m));
     }
@@ -631,21 +746,40 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       }));
     } else {
       try {
-        await fetch('/api/chat/messages', {
+        const res = await fetch('/api/chat/messages', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          setLocalChatError(errData?.error || 'Could not send message.');
+          setMessages(prev => prev.filter(m => m.id !== optimisticId));
+        }
       } catch (err) {
         console.error('[Chat] Failed REST fallback message send:', err);
       }
+    }
+
+    // Sync to Firestore when Firebase user is email-verified
+    if (auth.currentUser?.emailVerified) {
+      publishChatMessageToFirestore({
+        id: optimisticId,
+        channelId: currentChannel,
+        senderName: currentUser.name,
+        senderRole: currentUser.role,
+        messageType: resolvedType,
+        content: payload.content || '',
+        isOfficialReply,
+        replyTo: payload.replyTo,
+      }).catch(err => console.warn('[Chat] Firestore sync warning:', err));
     }
   };
 
   // Toggle Reaction
   const handleToggleReaction = async (messageId: string, emoji: string) => {
     if (!currentUser) {
-      onOpenAuth();
+      setLocalChatError('Join or sign in to react to messages.');
       return;
     }
 
@@ -672,12 +806,17 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     setShowEmojiPicker(null);
   };
 
-  // Admin message deletion (Requirement 5)
+  // Admin message deletion
   const handleDeleteMessage = async (messageId: string) => {
     if (currentUser?.role !== 'admin') return;
-    if (!window.confirm('Delete this message from the public customer support chat?')) return;
-
+    setConfirmDeleteMsgId(null);
     setMessages(prev => prev.filter(m => m.id !== messageId));
+
+    if (auth.currentUser?.emailVerified) {
+      deleteChatMessageInFirestore(messageId).catch(err =>
+        console.warn('[Chat] Firestore delete warning:', err)
+      );
+    }
 
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
@@ -695,12 +834,18 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     }
   };
 
-  // Admin question status toggle (Requirement 5)
-  const handleToggleStatus = async (messageId: string, currentStatus?: 'pending' | 'answered') => {
+  // Admin question status toggle
+  const handleToggleStatus = async (messageId: string, currentStatus?: 'pending' | 'answered' | 'open') => {
     if (currentUser?.role !== 'admin') return;
-    const newStatus = currentStatus === 'answered' ? 'pending' : 'answered';
+    const newStatus: 'pending' | 'answered' = currentStatus === 'answered' ? 'pending' : 'answered';
 
     setMessages(prev => prev.map(m => m.id === messageId ? { ...m, status: newStatus } : m));
+
+    if (auth.currentUser?.emailVerified) {
+      updateChatQuestionStatusInFirestore(messageId, newStatus, currentUser.name).catch(err =>
+        console.warn('[Chat] Firestore status warning:', err)
+      );
+    }
 
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
@@ -722,15 +867,42 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentMessages = messages.filter(m => m.channelId === currentChannel);
+  // Merge local WS messages with context Firestore + server messages deduplicated by id
+  const mergedMessages = (() => {
+    const map = new Map<string, ChatMessage>();
+    contextLatestMessages.forEach(m => map.set(m.id, m));
+    messages.forEach(m => {
+      // Remove superseded optimistic message if a matching server message arrived recently
+      if (!m.id.startsWith('msg-opt-')) {
+        map.set(m.id, m);
+      } else {
+        const hasServerMatch = Array.from(map.values()).some(
+          existing =>
+            !existing.id.startsWith('msg-opt-') &&
+            existing.senderId === m.senderId &&
+            existing.content === m.content &&
+            existing.channelId === m.channelId
+        );
+        if (!hasServerMatch) {
+          map.set(m.id, m);
+        }
+      }
+    });
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  })();
+
+  const currentMessages = mergedMessages.filter(m => m.channelId === currentChannel);
   const displayedMessages = currentMessages.filter(m => {
-    if (currentUser?.role === 'admin' && activeChannelId === 'general') {
-      if (adminFilter === 'pending') {
-        return m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer');
-      }
-      if (adminFilter === 'answered') {
-        return m.status === 'answered' || m.isOfficialReply;
-      }
+    if (messageFilter === 'questions') {
+      return isQuestionMessage(m);
+    }
+    if (messageFilter === 'pending') {
+      return isQuestionMessage(m) && m.status !== 'answered';
+    }
+    if (messageFilter === 'answered') {
+      return (isQuestionMessage(m) && m.status === 'answered') || m.messageType === 'answer' || Boolean(m.isOfficialReply);
     }
     return true;
   });
@@ -1324,50 +1496,62 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                 </div>
               </div>
 
-              {/* Admin Moderation Filters and Live Call Triggers */}
+              {/* Public Q&A Filter Bar (visible to everyone) and Live Call Triggers */}
               <div className="flex items-center gap-2 flex-wrap">
-                {currentUser?.role === 'admin' && activeChannelId === 'general' && (
-                  <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200">
-                    <button
-                      onClick={() => setAdminFilter('all')}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                        adminFilter === 'all'
-                          ? 'bg-emerald-800 text-white shadow-2xs'
-                          : 'text-stone-600 hover:text-stone-900'
-                      }`}
-                    >
-                      All ({currentMessages.length})
-                    </button>
-                    <button
-                      onClick={() => setAdminFilter('pending')}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                        adminFilter === 'pending'
-                          ? 'bg-amber-600 text-white shadow-2xs'
-                          : 'text-stone-600 hover:text-stone-900'
-                      }`}
-                      title="Filter questions awaiting Admin response"
-                    >
-                      <span>⏳ Awaiting Reply</span>
-                      <span className="px-1 py-0.1 bg-amber-200 text-amber-900 rounded-full text-[9px] font-black">
-                        {currentMessages.filter(m => (m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer'))).length}
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => setAdminFilter('answered')}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                        adminFilter === 'answered'
-                          ? 'bg-emerald-700 text-white shadow-2xs'
-                          : 'text-stone-600 hover:text-stone-900'
-                      }`}
-                      title="Filter answered questions"
-                    >
-                      <span>✅ Answered</span>
-                      <span className="px-1 py-0.1 bg-emerald-200 text-emerald-900 rounded-full text-[9px] font-black">
-                        {currentMessages.filter(m => m.status === 'answered' || m.isOfficialReply).length}
-                      </span>
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200">
+                  <button
+                    type="button"
+                    onClick={() => setMessageFilter('all')}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
+                      messageFilter === 'all'
+                        ? 'bg-emerald-800 text-white shadow-2xs'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    All ({currentMessages.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMessageFilter('questions')}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
+                      messageFilter === 'questions'
+                        ? 'bg-stone-800 text-white shadow-2xs'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    Questions ({currentMessages.filter(m => isQuestionMessage(m)).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMessageFilter('pending')}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
+                      messageFilter === 'pending'
+                        ? 'bg-amber-600 text-white shadow-2xs'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                    title="Filter questions awaiting Admin answer"
+                  >
+                    <span>Pending</span>
+                    <span className="px-1 py-0.1 bg-amber-200 text-amber-900 rounded-full text-[9px] font-black">
+                      {currentMessages.filter(m => isQuestionMessage(m) && m.status !== 'answered').length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMessageFilter('answered')}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 tabular-nums ${
+                      messageFilter === 'answered'
+                        ? 'bg-emerald-700 text-white shadow-2xs'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                    title="Filter Admin answers and resolved questions"
+                  >
+                    <span>Answered</span>
+                    <span className="px-1 py-0.1 bg-emerald-200 text-emerald-900 rounded-full text-[9px] font-black">
+                      {currentMessages.filter(m => (isQuestionMessage(m) && m.status === 'answered') || m.messageType === 'answer' || Boolean(m.isOfficialReply)).length}
+                    </span>
+                  </button>
+                </div>
 
                 <button
                   onClick={() => handleStartCall('voice')}
@@ -1405,16 +1589,17 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
               {/* Message Bubbles */}
               {displayedMessages.length === 0 ? (
                 <div className="text-center py-10 text-stone-400 text-xs">
-                  {adminFilter !== 'all' 
-                    ? `No messages found matching "${adminFilter}" filter.`
-                    : 'No messages yet in this lounge. Be the first to start the conversation! 🌿'}
+                  {messageFilter !== 'all' 
+                    ? `No messages found matching "${messageFilter}" filter.`
+                    : 'No messages yet in this channel. Be the first to start the conversation!'}
                 </div>
               ) : (
                 displayedMessages.map((msg) => {
                   const isMine = currentUser?.id === msg.senderId;
                   const senderBadge = getRoleBadge(msg.senderRole);
-                  const isOfficialReply = msg.isOfficialReply || (msg.senderRole === 'admin' && Boolean(msg.replyTo));
-                  const isCustomerQuestion = msg.senderRole === 'customer' && !msg.replyTo;
+                  const isOfficialAnswer = msg.messageType === 'answer' || Boolean(msg.isOfficialReply) || (msg.senderRole === 'admin' && Boolean(msg.replyTo));
+                  const isQuestion = isQuestionMessage(msg);
+                  const isGeneralReply = !isOfficialAnswer && (msg.messageType === 'reply' || Boolean(msg.replyTo));
 
                   return (
                     <div 
@@ -1423,7 +1608,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                     >
                       {/* Avatar */}
                       <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 shadow-2xs mt-1 ${
-                        isOfficialReply 
+                        isOfficialAnswer 
                           ? 'bg-amber-500 text-stone-950 font-black' 
                           : 'bg-stone-800 text-white'
                       }`}>
@@ -1435,34 +1620,41 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                         {/* Sender info & time */}
                         <div className="flex items-center gap-1.5 mb-1 px-1 flex-wrap">
                           <span className="font-extrabold text-xs text-stone-900">{msg.senderName}</span>
-                          <span className={`text-[8px] font-extrabold px-1.5 py-0.2 rounded-md border ${senderBadge.bg}`}>
+                          <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-md border whitespace-nowrap ${senderBadge.bg}`}>
                             {senderBadge.label}
                           </span>
                           
-                          {/* Official Admin Reply Badge */}
-                          {isOfficialReply && (
-                            <span className="text-[8px] font-black px-1.5 py-0.2 rounded-md bg-amber-400 text-stone-950 uppercase border border-amber-500 shadow-2xs flex items-center gap-1">
-                              <span>👑 Official Admin Reply</span>
+                          {/* Official Admin Answer Badge */}
+                          {isOfficialAnswer && (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-amber-400 text-stone-950 uppercase border border-amber-500 shadow-2xs flex items-center gap-1 whitespace-nowrap">
+                              <span>Admin Answer</span>
                             </span>
                           )}
 
-                          {/* Customer Question Status Badge */}
-                          {isCustomerQuestion && (
+                          {/* Question Status Badge */}
+                          {isQuestion && (
                             msg.status === 'answered' ? (
-                              <span className="text-[8px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 whitespace-nowrap">
                                 <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
-                                <span>Answered by Admin</span>
+                                <span>Question Answered</span>
                               </span>
                             ) : (
-                              <span className="text-[8px] font-bold px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
-                                <span>⏳ Awaiting Admin Reply</span>
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 whitespace-nowrap">
+                                <span>Question Pending</span>
                               </span>
                             )
                           )}
 
-                          {msg.senderRole === 'admin' && !isOfficialReply && (
-                            <span className="text-[8px] font-black px-1.5 py-0.2 rounded-md bg-amber-400 text-stone-950 uppercase border border-amber-300 shadow-2xs">
-                              👑 Directive
+                          {/* General Reply Badge */}
+                          {isGeneralReply && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-300 whitespace-nowrap">
+                              Reply
+                            </span>
+                          )}
+
+                          {msg.senderRole === 'admin' && !isOfficialAnswer && (
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-amber-400 text-stone-950 uppercase border border-amber-300 shadow-2xs whitespace-nowrap">
+                              Admin Post
                             </span>
                           )}
                           <span className="text-[10px] text-stone-400">{msg.timeFormatted}</span>
@@ -1470,9 +1662,9 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
                         {/* Quoted message if replied */}
                         {msg.replyTo && (
-                          <div className="mb-1 p-2 rounded-xl bg-amber-50/90 text-[11px] text-stone-800 border-l-3 border-amber-500 flex items-center gap-1.5 shadow-2xs">
+                          <div className="mb-1 px-2.5 py-1.5 rounded-xl bg-amber-50/90 text-[11px] text-stone-800 border border-amber-200/90 flex items-center gap-1.5 shadow-2xs">
                             <CornerDownRight className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            <span className="font-black text-amber-950">{msg.replyTo.senderName}:</span>
+                            <span className="font-black text-amber-950 shrink-0">{msg.replyTo.senderName}:</span>
                             <span className="truncate italic">{msg.replyTo.content}</span>
                           </div>
                         )}
@@ -1496,7 +1688,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
                         {/* Message content bubble */}
                         <div className={`p-3.5 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-2xs group relative ${
-                          isOfficialReply
+                          isOfficialAnswer
                             ? 'bg-amber-50/95 text-stone-950 border-2 border-amber-400 rounded-tl-none shadow-xs'
                             : isMine 
                               ? 'bg-emerald-800 text-white rounded-tr-none' 
@@ -1612,93 +1804,131 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                             </div>
                           )}
 
-                          {/* Admin Management Strip on Customer Question (Requirements 3 & 5) */}
-                          {currentUser?.role === 'admin' && isCustomerQuestion && (
-                            <div className="mt-2.5 pt-2 border-t border-stone-200/80 flex items-center gap-1.5 flex-wrap">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setReplyingTo(msg);
-                                  setTimeout(() => {
-                                    const inp = document.querySelector('input[placeholder*="Reply as Admin"], input[placeholder*="Ask a question"]') as HTMLInputElement;
-                                    inp?.focus();
-                                  }, 100);
-                                }}
-                                className="px-2.5 py-1 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-[11px] font-black flex items-center gap-1 shadow-2xs cursor-pointer transition-all"
-                                title="Reply officially as Administrator to this customer question"
-                              >
-                                <Reply className="w-3.5 h-3.5 text-stone-950" />
-                                <span>Reply as Admin</span>
-                              </button>
+                          {/* Q&A Footer Strip on Questions: Admin gets Answer Question / moderation; Non-admins see Only Admin Can Answer */}
+                          {isQuestion && (
+                            currentUser?.role === 'admin' ? (
+                              <div className="mt-2.5 pt-2 border-t border-stone-200/80 flex items-center gap-1.5 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={() => handleInitiateReply(msg)}
+                                  className="px-2.5 py-1 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-[11px] font-black flex items-center gap-1 shadow-2xs cursor-pointer transition-all whitespace-nowrap shrink-0"
+                                  title="Answer this question officially as Admin"
+                                >
+                                  <Reply className="w-3.5 h-3.5 text-stone-950" />
+                                  <span>Answer Question</span>
+                                </button>
 
-                              <button
-                                type="button"
-                                onClick={() => handleToggleStatus(msg.id, msg.status)}
-                                className="px-2 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold border border-stone-300 flex items-center gap-1 cursor-pointer transition-all"
-                                title="Toggle question resolution status"
-                              >
-                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                <span>{msg.status === 'answered' ? 'Mark Pending' : 'Mark Answered'}</span>
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleStatus(msg.id, msg.status)}
+                                  className="px-2 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold border border-stone-300 flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap shrink-0"
+                                  title="Toggle question resolution status"
+                                >
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>{msg.status === 'answered' ? 'Mark Pending' : 'Mark Answered'}</span>
+                                </button>
 
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteMessage(msg.id)}
-                                className="px-2 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold border border-rose-200 flex items-center gap-1 cursor-pointer transition-all ml-auto"
-                                title="Delete this message (Admin moderation)"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Delete</span>
-                              </button>
-                            </div>
+                                {confirmDeleteMsgId === msg.id ? (
+                                  <div className="flex items-center gap-1 ml-auto">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteMessage(msg.id)}
+                                      className="px-2 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-bold cursor-pointer whitespace-nowrap"
+                                    >
+                                      Confirm Delete
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteMsgId(null)}
+                                      className="px-1.5 py-1 rounded-lg bg-stone-200 text-stone-700 text-[10px] font-bold cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteMsgId(msg.id)}
+                                    className="px-2 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold border border-rose-200 flex items-center gap-1 cursor-pointer transition-all ml-auto whitespace-nowrap shrink-0"
+                                    title="Delete this question"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>Delete</span>
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <div className={`mt-2 pt-1.5 border-t text-[10px] flex items-center gap-1.5 ${
+                                isMine ? 'border-emerald-700/70 text-emerald-100' : 'border-stone-200/80 text-stone-500'
+                              }`}>
+                                <Lock className="w-3 h-3 shrink-0" />
+                                <span>Only Admin can answer questions</span>
+                              </div>
+                            )
                           )}
 
-                          {/* Admin Deletion Action on Admin's Own Reply */}
-                          {currentUser?.role === 'admin' && isOfficialReply && (
-                            <div className="mt-2 pt-1.5 border-t border-amber-200/60 flex items-center justify-end">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteMessage(msg.id)}
-                                className="text-[10px] text-rose-700 hover:text-rose-900 font-bold flex items-center gap-1 cursor-pointer"
-                                title="Delete official reply"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Delete Reply</span>
-                              </button>
+                          {/* Moderation Action on Admin Answer */}
+                          {currentUser?.role === 'admin' && isOfficialAnswer && (
+                            <div className="mt-2 pt-1.5 border-t border-amber-200/60 flex items-center justify-end gap-2">
+                              {confirmDeleteMsgId === msg.id ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteMessage(msg.id)}
+                                    className="px-2 py-0.5 rounded-lg bg-rose-600 text-white text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Confirm Delete
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteMsgId(null)}
+                                    className="px-1.5 py-0.5 rounded-lg bg-stone-200 text-stone-700 text-[10px] font-bold cursor-pointer"
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteMsgId(msg.id)}
+                                  className="text-[10px] text-rose-700 hover:text-rose-900 font-bold flex items-center gap-1 cursor-pointer"
+                                  title="Delete official answer"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Delete Answer</span>
+                                </button>
+                              )}
                             </div>
                           )}
 
                           {/* Quick action buttons on hover */}
                           <div className={`absolute -top-3 ${isMine ? 'left-2' : 'right-2'} hidden group-hover:flex items-center gap-1 bg-white border border-stone-200 shadow-md rounded-full px-2 py-0.5 z-10`}>
-                            {currentUser?.role === 'admin' ? (
+                            {(!isQuestion || currentUser?.role === 'admin') ? (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setReplyingTo(msg);
-                                  setTimeout(() => {
-                                    const inp = document.querySelector('input[placeholder*="Reply as Admin"], input[placeholder*="Ask a question"]') as HTMLInputElement;
-                                    inp?.focus();
-                                  }, 100);
-                                }}
-                                className="text-amber-800 hover:text-amber-950 p-0.5 cursor-pointer flex items-center gap-0.5 text-[10px] font-bold"
-                                title="Reply officially as Admin"
+                                onClick={() => handleInitiateReply(msg)}
+                                className="text-emerald-800 hover:text-emerald-950 p-0.5 cursor-pointer flex items-center gap-0.5 text-[10px] font-bold whitespace-nowrap"
+                                title={currentUser?.role === 'admin' && isQuestion ? 'Answer Question as Admin' : 'Reply to message'}
                               >
                                 <Reply className="w-3 h-3" />
-                                <span className="hidden sm:inline">Reply</span>
+                                <span className="hidden sm:inline">
+                                  {currentUser?.role === 'admin' && isQuestion ? 'Answer' : 'Reply'}
+                                </span>
                               </button>
                             ) : (
                               <span 
-                                className="text-stone-400 p-0.5 flex items-center gap-0.5 text-[9px] cursor-not-allowed"
-                                title="Only Administrator can reply to customer questions"
+                                className="text-stone-400 p-0.5 flex items-center gap-0.5 text-[9px] cursor-not-allowed whitespace-nowrap"
+                                title="Only Admin is permitted to provide answers to questions"
                               >
                                 <Lock className="w-2.5 h-2.5" />
+                                <span className="hidden sm:inline">Admin Only</span>
                               </span>
                             )}
 
                             {currentUser?.role === 'admin' && (
                               <button
                                 type="button"
-                                onClick={() => handleDeleteMessage(msg.id)}
+                                onClick={() => setConfirmDeleteMsgId(msg.id)}
                                 className="text-stone-400 hover:text-rose-600 p-0.5 cursor-pointer"
                                 title="Delete message"
                               >
@@ -1849,17 +2079,46 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
               </div>
             )}
 
-            {/* REPLY BANNER */}
+            {/* ERROR / PERMISSION ALERT BANNER */}
+            {(localChatError || contextChatError) && (
+              <div className="px-4 py-2 bg-rose-50 border-t border-rose-200 flex items-center justify-between text-xs text-rose-900 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span className="font-bold truncate">{localChatError || contextChatError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocalChatError(null);
+                    clearChatError();
+                  }}
+                  className="p-1 hover:bg-rose-100 rounded-lg text-rose-800 cursor-pointer shrink-0"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* REPLY / ANSWER BANNER */}
             {replyingTo && (
-              <div className="px-4 py-1.5 bg-emerald-50 border-t border-emerald-200 flex items-center justify-between text-xs text-emerald-950 shrink-0">
+              <div className={`px-4 py-1.5 border-t flex items-center justify-between text-xs shrink-0 ${
+                currentUser?.role === 'admin' && isQuestionMessage(replyingTo)
+                  ? 'bg-amber-50 border-amber-200 text-amber-950'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-950'
+              }`}>
                 <div className="flex items-center gap-2 min-w-0">
                   <CornerDownRight className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                  <span className="font-bold">Replying to {replyingTo.senderName}:</span>
+                  <span className="font-bold shrink-0">
+                    {currentUser?.role === 'admin' && isQuestionMessage(replyingTo)
+                      ? `Answering question from ${replyingTo.senderName}:`
+                      : `Replying to ${replyingTo.senderName}:`}
+                  </span>
                   <span className="truncate italic text-stone-600 max-w-sm">{replyingTo.content}</span>
                 </div>
                 <button 
+                  type="button"
                   onClick={() => setReplyingTo(null)}
-                  className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-800 cursor-pointer"
+                  className="p-1 hover:bg-black/5 rounded-lg text-stone-700 cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -1955,15 +2214,43 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
               </div>
             )}
 
-            {/* INPUT COMPOSER / SEND BAR WITH CLEAR MEDIA BUTTONS */}
+            {/* INPUT COMPOSER / SEND BAR WITH MODE TOGGLE & QUICK JOIN */}
             <div className="p-3 bg-white border-t border-stone-200 shrink-0">
               {currentUser ? (
                 <form onSubmit={handleSendMessage} className="space-y-2">
                   
-                  {/* MEDIA TOOLBAR BUTTONS WITH VISUAL LABELS */}
-                  <div className="flex items-center justify-between text-xs pb-1 border-b border-stone-100">
+                  {/* MEDIA TOOLBAR + COMPOSER MODE TOGGLE */}
+                  <div className="flex items-center justify-between text-xs pb-1 border-b border-stone-100 gap-2 flex-wrap">
                     <div className="flex items-center gap-1 sm:gap-2">
                       
+                      {/* Ask Question vs Post Message mode (when not replying) */}
+                      {!replyingTo && (
+                        <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200">
+                          <button
+                            type="button"
+                            onClick={() => setComposerMode('question')}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                              composerMode === 'question'
+                                ? 'bg-amber-400 text-stone-950 shadow-2xs'
+                                : 'text-stone-600 hover:text-stone-900'
+                            }`}
+                          >
+                            Ask Question
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setComposerMode('message')}
+                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                              composerMode === 'message'
+                                ? 'bg-emerald-800 text-white shadow-2xs'
+                                : 'text-stone-600 hover:text-stone-900'
+                            }`}
+                          >
+                            Post Message
+                          </button>
+                        </div>
+                      )}
+
                       {/* 1. APPLY IMAGE BUTTON */}
                       <button
                         type="button"
@@ -1976,7 +2263,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                         title="Apply an Image / Produce Photo"
                       >
                         <ImageIcon className="w-3.5 h-3.5 text-emerald-700" />
-                        <span className="hidden sm:inline">Apply Image</span>
+                        <span className="hidden md:inline">Image</span>
                       </button>
 
                       {/* 2. ATTACH FILE BUTTON */}
@@ -1991,7 +2278,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                         title="Attach Document or Receipt (PDF, DOC, TXT)"
                       >
                         <Paperclip className="w-3.5 h-3.5 text-blue-700" />
-                        <span className="hidden sm:inline">Attach File</span>
+                        <span className="hidden md:inline">File</span>
                       </button>
 
                       {/* 3. TAG PRODUCE BUTTON */}
@@ -2006,7 +2293,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                         title="Tag Farm Produce from Catalog"
                       >
                         <ShoppingBag className="w-3.5 h-3.5 text-amber-700" />
-                        <span className="hidden sm:inline">Tag Produce</span>
+                        <span className="hidden md:inline">Tag Produce</span>
                       </button>
 
                     </div>
@@ -2038,15 +2325,18 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                     {/* Text input */}
                     <div className="flex-1 relative">
                       <input
+                        ref={composerInputRef}
                         type="text"
                         value={inputText}
                         onChange={(e) => handleInputChange(e.target.value)}
                         placeholder={
-                          activeChannelId === 'general'
-                            ? (currentUser.role === 'admin'
-                                ? (replyingTo ? `Replying as Administrator to ${replyingTo.senderName}...` : `Type official announcement or answer as Administrator...`)
-                                : `Ask a question to Fofo Green Support & Admin (e.g. avocado ripeness, delivery)...`)
-                            : `Message #${activeChannelDef?.name || 'General Lounge'}...`
+                          replyingTo
+                            ? currentUser.role === 'admin'
+                              ? `Write official Admin answer to ${replyingTo.senderName}...`
+                              : `Write your reply to ${replyingTo.senderName}...`
+                            : composerMode === 'question'
+                            ? `Ask a question for Admin to answer in #${activeChannelDef?.name || 'General Lounge'}...`
+                            : `Post a message in #${activeChannelDef?.name || 'General Lounge'}...`
                         }
                         className="w-full bg-stone-100 border border-stone-200 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-900 outline-hidden focus:border-emerald-500 focus:bg-white transition-all shadow-inner"
                       />
@@ -2078,12 +2368,14 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                     <button
                       type="submit"
                       disabled={!inputText.trim() && !selectedProductToTag && pendingAttachments.length === 0 && !pendingVoiceNote}
-                      className="px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+                      className="px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0 whitespace-nowrap"
                     >
                       <span>
-                        {currentUser.role === 'admin' && replyingTo
-                          ? 'Send Reply'
-                          : currentUser.role === 'customer' && activeChannelId === 'general'
+                        {replyingTo
+                          ? currentUser.role === 'admin'
+                            ? 'Post Answer'
+                            : 'Send Reply'
+                          : composerMode === 'question'
                             ? 'Ask Question'
                             : 'Send'}
                       </span>
@@ -2094,17 +2386,38 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
                 </form>
               ) : (
-                <div className="flex items-center justify-between p-2 rounded-2xl bg-amber-50 border border-amber-200">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2.5 rounded-2xl bg-amber-50 border border-amber-200">
                   <div className="flex items-center gap-2 text-xs text-amber-950">
-                    <UserIcon className="w-4 h-4 text-amber-700" />
-                    <span>You must be joined or logged in to send voice messages, photos, files or video call.</span>
+                    <UserIcon className="w-4 h-4 text-amber-700 shrink-0" />
+                    <span>Reading all public messages. Join below to ask questions or reply to discussions.</span>
                   </div>
-                  <button
-                    onClick={onOpenAuth}
-                    className="px-3.5 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs shrink-0"
-                  >
-                    Join / Sign In Now
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    {onQuickJoinCustomer && (
+                      <form onSubmit={handleQuickJoinSubmit} className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={guestNameInput}
+                          onChange={(e) => setGuestNameInput(e.target.value)}
+                          placeholder="Your name..."
+                          className="w-36 sm:w-44 bg-white border border-amber-300 rounded-xl px-2.5 py-1.5 text-xs text-stone-900 outline-hidden focus:border-emerald-600"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!guestNameInput.trim()}
+                          className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-45 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                        >
+                          Join Chat
+                        </button>
+                      </form>
+                    )}
+                    <button
+                      type="button"
+                      onClick={onOpenAuth}
+                      className="px-3 py-1.5 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      Sign In
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

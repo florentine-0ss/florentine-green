@@ -9,6 +9,8 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = path.resolve(__dirname, '../data');
 const CHAT_FILE = path.resolve(DATA_DIR, 'fofo-chat-messages.json');
 
+export type ChatMessageType = 'question' | 'reply' | 'answer' | 'message';
+
 export interface ServerChatMessage {
   id: string;
   channelId: string;
@@ -16,6 +18,7 @@ export interface ServerChatMessage {
   senderName: string;
   senderRole: string;
   senderAvatar?: string;
+  messageType?: ChatMessageType;
   content: string;
   timestamp: string;
   timeFormatted: string;
@@ -55,7 +58,7 @@ export interface ServerChatMessage {
   recipientId?: string;
   recipientName?: string;
   isOfficialReply?: boolean;
-  status?: 'pending' | 'answered';
+  status?: 'pending' | 'answered' | 'open';
   answeredBy?: string;
   answeredAt?: string;
 }
@@ -144,6 +147,8 @@ const INITIAL_SEED_MESSAGES: ServerChatMessage[] = [
     senderId: 'usr-customer-1',
     senderName: 'Divine Uwase',
     senderRole: 'customer',
+    messageType: 'message',
+    status: 'open',
     content: 'Muraho Florentine! I just received my Isombe recipe kit today in Kacyiru. Attaching the complete recipe card that came with the basket for anyone who wants to try it!',
     timestamp: new Date(Date.now() - 3600000 * 3).toISOString(),
     timeFormatted: '3 hrs ago',
@@ -160,11 +165,47 @@ const INITIAL_SEED_MESSAGES: ServerChatMessage[] = [
     ]
   },
   {
+    id: 'msg-seed-q-1',
+    channelId: 'general',
+    senderId: 'usr-customer-2',
+    senderName: 'Jean-Luc Habimana',
+    senderRole: 'customer',
+    messageType: 'question',
+    status: 'answered',
+    answeredBy: 'Florentine Mushimiyimana',
+    content: 'Do you offer same-day cold-chain delivery to Kimihurura for orders placed before 4:00 PM?',
+    timestamp: new Date(Date.now() - 3600000 * 2.7).toISOString(),
+    timeFormatted: '2 hrs ago',
+    reactions: { '👍': ['usr-customer-1'] }
+  },
+  {
+    id: 'msg-seed-a-1',
+    channelId: 'general',
+    senderId: 'usr-admin',
+    senderName: 'Florentine Mushimiyimana',
+    senderRole: 'admin',
+    messageType: 'answer',
+    isOfficialReply: true,
+    status: 'answered',
+    answeredBy: 'Florentine Mushimiyimana',
+    content: 'Yes Jean-Luc! Orders placed before 4:00 PM qualify for same-day chilled Solar Moto delivery across Kimihurura, Kacyiru, Remera, and Nyarugenge within 35–55 minutes.',
+    timestamp: new Date(Date.now() - 3600000 * 2.6).toISOString(),
+    timeFormatted: '2 hrs ago',
+    reactions: { '🌿': ['usr-customer-2', 'usr-customer-1'] },
+    replyTo: {
+      id: 'msg-seed-q-1',
+      senderName: 'Jean-Luc Habimana',
+      content: 'Do you offer same-day cold-chain delivery to Kimihurura for orders placed...'
+    }
+  },
+  {
     id: 'msg-seed-3',
     channelId: 'fresh-harvest',
     senderId: 'usr-stock',
     senderName: 'Eric Mugisha',
     senderRole: 'stock_manager',
+    messageType: 'message',
+    status: 'open',
     content: 'Voice note briefing on this morning\'s Musanze harvest delivery. Listen below for sorting & ripeness details!',
     timestamp: new Date(Date.now() - 3600000 * 2.5).toISOString(),
     timeFormatted: '2 hrs ago',
@@ -188,7 +229,10 @@ const INITIAL_SEED_MESSAGES: ServerChatMessage[] = [
     senderId: 'usr-customer-3',
     senderName: 'Sarah Mitchell',
     senderRole: 'customer',
-    content: 'Eric, are the avocados ready-to-eat today or do they need a couple of days to soften on the counter?',
+    messageType: 'question',
+    status: 'answered',
+    answeredBy: 'Florentine Mushimiyimana',
+    content: 'Are the Musanze Hass avocados ready-to-eat today or do they need a couple of days to soften on the counter?',
     timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
     timeFormatted: '2 hrs ago',
     reactions: {}
@@ -196,17 +240,21 @@ const INITIAL_SEED_MESSAGES: ServerChatMessage[] = [
   {
     id: 'msg-seed-5',
     channelId: 'fresh-harvest',
-    senderId: 'usr-sales',
-    senderName: 'Kevin Niyonzima',
-    senderRole: 'sales_attendant',
-    content: 'Hi Sarah! About half the batch is gently yielding and perfect for today\'s guacamole, while the rest can ripen over 2–3 days. You can specify "Ripe for Today" in your order notes!',
+    senderId: 'usr-admin',
+    senderName: 'Florentine Mushimiyimana',
+    senderRole: 'admin',
+    messageType: 'answer',
+    isOfficialReply: true,
+    status: 'answered',
+    answeredBy: 'Florentine Mushimiyimana',
+    content: 'Hi Sarah! About half the batch is gently yielding and perfect for today\'s guacamole, while the rest ripens over 2–3 days. You can note "Ripe for Today" at checkout!',
     timestamp: new Date(Date.now() - 3600000 * 1.8).toISOString(),
     timeFormatted: '1 hr ago',
     reactions: { '👍': ['usr-customer-3'] },
     replyTo: {
       id: 'msg-seed-4',
       senderName: 'Sarah Mitchell',
-      content: 'Eric, are the avocados ready-to-eat today or do they need a couple of days...'
+      content: 'Are the Musanze Hass avocados ready-to-eat today or do they need a couple...'
     }
   },
   {
@@ -342,6 +390,21 @@ class ChatService {
     return channelId;
   }
 
+  private isQuestionMessage(m?: Partial<ServerChatMessage> | null): boolean {
+    if (!m) return false;
+    if (m.messageType === 'question') return true;
+    if (m.messageType === 'answer' || m.messageType === 'reply' || m.messageType === 'message') {
+      return false;
+    }
+    return Boolean(
+      m.senderRole === 'customer' &&
+        !m.replyTo &&
+        (m.status === 'pending' ||
+          m.status === 'answered' ||
+          (typeof m.content === 'string' && m.content.trim().endsWith('?')))
+    );
+  }
+
   private normalizeMessageToPublic(m: any): { msg: ServerChatMessage; changed: boolean } {
     const normalizedChannel = this.normalizePublicChannel(m.channelId, m.recipientId);
     const hadPrivateFlags = Boolean(
@@ -350,10 +413,51 @@ class ChatService {
       m.recipientName ||
       (typeof m.channelId === 'string' && m.channelId.startsWith('dm:'))
     );
-    if (!hadPrivateFlags && normalizedChannel === m.channelId) {
+
+    let nextObj = { ...m };
+    let changed = hadPrivateFlags || normalizedChannel !== m.channelId;
+
+    if (nextObj.id === 'msg-seed-4' && nextObj.messageType !== 'question') {
+      nextObj = {
+        ...nextObj,
+        messageType: 'question',
+        status: 'answered',
+        answeredBy: 'Florentine Mushimiyimana',
+      };
+      changed = true;
+    }
+
+    if (nextObj.id === 'msg-seed-5' && nextObj.senderRole !== 'admin') {
+      nextObj = {
+        ...nextObj,
+        senderId: 'usr-admin',
+        senderName: 'Florentine Mushimiyimana',
+        senderRole: 'admin',
+        messageType: 'answer',
+        isOfficialReply: true,
+        status: 'answered',
+        answeredBy: 'Florentine Mushimiyimana',
+      };
+      changed = true;
+    }
+
+    if (!nextObj.messageType) {
+      if (nextObj.isOfficialReply || (nextObj.senderRole === 'admin' && nextObj.replyTo)) {
+        nextObj.messageType = 'answer';
+      } else if (nextObj.replyTo) {
+        nextObj.messageType = 'reply';
+      } else if (this.isQuestionMessage(nextObj)) {
+        nextObj.messageType = 'question';
+      } else {
+        nextObj.messageType = 'message';
+      }
+      changed = true;
+    }
+
+    if (!changed) {
       return { msg: m, changed: false };
     }
-    const { recipientId, recipientName, ...rest } = m;
+    const { recipientId, recipientName, ...rest } = nextObj;
     return {
       msg: {
         ...rest,
@@ -421,14 +525,46 @@ class ChatService {
   }
 
   public addMessage(msg: Omit<ServerChatMessage, 'id' | 'timestamp' | 'timeFormatted' | 'reactions'> & { reactions?: Record<string, string[]> }): ServerChatMessage {
-    // REQUIREMENT 3: Only the Admin can reply to customer questions
-    if (msg.replyTo && msg.senderRole !== 'admin') {
-      throw new Error('Only the Administrator can reply to customer questions in the public customer support chat.');
+    const parentMsg = msg.replyTo?.id
+      ? this.messages.find((m) => m.id === msg.replyTo!.id)
+      : undefined;
+
+    const requestedType: ChatMessageType =
+      msg.messageType ||
+      (msg.senderRole === 'admin' && Boolean(msg.replyTo)
+        ? 'answer'
+        : msg.replyTo
+        ? 'reply'
+        : msg.senderRole === 'customer' && msg.content?.trim().endsWith('?')
+        ? 'question'
+        : 'message');
+
+    // Enforce: Anyone can reply or ask questions, but ONLY Admin is permitted to provide answers to questions
+    if (msg.senderRole !== 'admin') {
+      if (requestedType === 'answer' || msg.isOfficialReply) {
+        throw new Error('Only the Admin is permitted to provide answers to questions.');
+      }
+      if (parentMsg && this.isQuestionMessage(parentMsg)) {
+        throw new Error(
+          'Only the Admin is permitted to provide answers to questions. You can ask a new question or reply to general discussions.'
+        );
+      }
     }
 
     const id = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     const now = new Date();
-    const isOfficialReply = msg.senderRole === 'admin' && Boolean(msg.replyTo);
+    const isAdminAnswering =
+      msg.senderRole === 'admin' &&
+      (requestedType === 'answer' ||
+        Boolean(parentMsg && this.isQuestionMessage(parentMsg)) ||
+        Boolean(msg.isOfficialReply));
+
+    const finalType: ChatMessageType = isAdminAnswering
+      ? 'answer'
+      : requestedType === 'answer'
+      ? 'reply'
+      : requestedType;
+
     const { recipientId: _rId, recipientName: _rName, isDirectMessage: _dm, ...cleanMsg } = msg;
     const publicChannelId = this.normalizePublicChannel(msg.channelId, msg.recipientId);
 
@@ -437,27 +573,29 @@ class ChatService {
       channelId: publicChannelId,
       isDirectMessage: false,
       id,
+      messageType: finalType,
       timestamp: now.toISOString(),
       timeFormatted: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       reactions: msg.reactions || {},
-      isOfficialReply,
-      status: isOfficialReply ? 'answered' : (msg.status || (msg.senderRole === 'customer' ? 'pending' : undefined)),
-      answeredBy: isOfficialReply ? msg.senderName : undefined,
-      answeredAt: isOfficialReply ? now.toISOString() : undefined
+      isOfficialReply: isAdminAnswering,
+      status: isAdminAnswering
+        ? 'answered'
+        : finalType === 'question'
+        ? 'pending'
+        : 'open',
+      answeredBy: isAdminAnswering ? msg.senderName : undefined,
+      answeredAt: isAdminAnswering ? now.toISOString() : undefined
     };
 
-    // If Admin is replying to an existing customer question, mark the parent question as answered
-    if (isOfficialReply && msg.replyTo?.id) {
-      const parentMsg = this.messages.find(m => m.id === msg.replyTo!.id);
-      if (parentMsg) {
-        parentMsg.status = 'answered';
-        parentMsg.answeredBy = msg.senderName;
-        parentMsg.answeredAt = now.toISOString();
-        this.broadcast({
-          type: 'chat:status',
-          payload: { messageId: parentMsg.id, status: 'answered', message: parentMsg }
-        });
-      }
+    // If Admin is answering a question, mark the parent question as answered in real time
+    if (isAdminAnswering && parentMsg) {
+      parentMsg.status = 'answered';
+      parentMsg.answeredBy = msg.senderName;
+      parentMsg.answeredAt = now.toISOString();
+      this.broadcast({
+        type: 'chat:status',
+        payload: { messageId: parentMsg.id, status: 'answered', message: parentMsg }
+      });
     }
 
     this.messages.push(newMsg);
@@ -619,19 +757,9 @@ class ChatService {
               const meta = this.connectedSockets.get(ws);
               if (!meta?.userId || !payload?.content) break;
 
-              // REQUIREMENT 3: Only the Admin can reply to customer questions
-              if (payload.replyTo && meta.role !== 'admin') {
-                ws.send(JSON.stringify({
-                  type: 'chat:error',
-                  payload: {
-                    message: 'Only the Administrator can reply to customer questions in the public customer support chat.'
-                  }
-                }));
-                break;
-              }
-
               try {
                 // Trust the authenticated socket identity, never a client-supplied sender.
+                // addMessage enforces that anyone can post/reply/ask questions while ONLY admin can answer questions.
                 this.addMessage({
                   ...payload,
                   senderId: meta.userId,

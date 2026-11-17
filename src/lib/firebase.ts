@@ -5,11 +5,19 @@ import {
   doc,
   getDoc,
   setDoc,
+  updateDoc,
+  deleteDoc,
+  collection,
+  query,
+  orderBy,
+  limit,
+  onSnapshot,
   getDocFromServer,
   serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { User } from '../types';
+import { User, ChatMessage, ChatMessageType } from '../types';
 import { DEFAULT_ROLE_PERMISSIONS } from '../data/mockData';
 
 const app = initializeApp(firebaseConfig);
@@ -153,8 +161,6 @@ export async function syncFirebaseUserProfile(
       lastLogin: 'Just now',
     };
   } catch (error) {
-    // Surface structured error context if Firestore rule or connectivity fails,
-    // while building an in-session customer identity fallback only if offline
     if (error instanceof Error && error.message.toLowerCase().includes('permission')) {
       handleFirestoreError(error, OperationType.WRITE, userPath);
     }
@@ -172,5 +178,206 @@ export async function syncFirebaseUserProfile(
       permissions: DEFAULT_ROLE_PERMISSIONS[fallbackRole],
       lastLogin: 'Just now',
     };
+  }
+}
+
+// --- FIRESTORE PUBLIC Q&A CHAT REAL-TIME SYNC ---
+const ALLOWED_CHAT_CHANNELS = new Set([
+  'general',
+  'fresh-harvest',
+  'delivery-kigali',
+  'staff-internal',
+  'staff-support',
+]);
+
+const firestoreChatMessageIds = new Set<string>();
+
+function sanitizeFirestoreId(raw: string): string {
+  const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80);
+  return cleaned || `msg-${Date.now()}`;
+}
+
+export function subscribeToPublicChatMessages(
+  onUpdate: (messages: ChatMessage[]) => void
+): () => void {
+  if (!auth.currentUser) {
+    return () => {};
+  }
+
+  const chatPath = 'chat_messages';
+  const q = query(collection(db, chatPath), orderBy('createdAt', 'asc'), limit(250));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const parsed: ChatMessage[] = [];
+      firestoreChatMessageIds.clear();
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        firestoreChatMessageIds.add(docSnap.id);
+        const createdDate =
+          d.createdAt instanceof Timestamp ? d.createdAt.toDate() : new Date();
+        parsed.push({
+          id: String(d.id || docSnap.id),
+          channelId: String(d.channelId || 'general'),
+          senderId: String(d.senderUid || 'usr-member'),
+          senderName: String(d.senderName || 'Joined Member'),
+          senderRole: String(d.senderRole || 'customer'),
+          messageType: (d.messageType as ChatMessageType) || 'message',
+          content: String(d.content || ''),
+          timestamp: createdDate.toISOString(),
+          timeFormatted: createdDate.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          reactions: {},
+          isOfficialReply: Boolean(d.isOfficialReply),
+          status:
+            d.status === 'pending' || d.status === 'answered' || d.status === 'open'
+              ? d.status
+              : 'open',
+          answeredBy: d.answeredBy ? String(d.answeredBy) : undefined,
+          answeredAt:
+            d.answeredAt instanceof Timestamp
+              ? d.answeredAt.toDate().toISOString()
+              : undefined,
+          replyTo: d.replyToSenderName
+            ? {
+                id: String(d.replyToId || ''),
+                senderName: String(d.replyToSenderName),
+                content: String(d.replyToContent || ''),
+              }
+            : undefined,
+        });
+      });
+      onUpdate(parsed);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.LIST, chatPath);
+    }
+  );
+}
+
+export async function publishChatMessageToFirestore(msg: {
+  id: string;
+  channelId: string;
+  senderName: string;
+  senderRole: string;
+  messageType: ChatMessageType;
+  content: string;
+  isOfficialReply: boolean;
+  replyTo?: { id: string; senderName: string; content: string };
+}): Promise<void> {
+  const fbUser = auth.currentUser;
+  if (!fbUser || !fbUser.emailVerified) return;
+
+  const safeId = sanitizeFirestoreId(msg.id);
+  const safeChannel = ALLOWED_CHAT_CHANNELS.has(msg.channelId)
+    ? msg.channelId
+    : 'general';
+  const safeSenderRole =
+    fbUser.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL &&
+    msg.senderRole === 'admin'
+      ? 'admin'
+      : 'customer';
+
+  const effectiveType: ChatMessageType =
+    safeSenderRole === 'admin' && msg.isOfficialReply
+      ? 'answer'
+      : msg.messageType === 'answer' && safeSenderRole !== 'admin'
+      ? 'message'
+      : msg.messageType;
+
+  const effectiveOfficial = safeSenderRole === 'admin' && effectiveType === 'answer';
+  const effectiveStatus = effectiveOfficial
+    ? 'answered'
+    : effectiveType === 'question'
+    ? 'pending'
+    : 'open';
+
+  const payload: Record<string, unknown> = {
+    id: safeId,
+    channelId: safeChannel,
+    senderUid: fbUser.uid,
+    senderName: (msg.senderName || fbUser.displayName || 'Customer').slice(0, 120),
+    senderRole: safeSenderRole,
+    messageType: effectiveType,
+    content: (msg.content || '').slice(0, 2000),
+    isOfficialReply: effectiveOfficial,
+    status: effectiveStatus,
+    createdAt: serverTimestamp(),
+  };
+
+  if (msg.replyTo?.senderName) {
+    payload.replyToSenderName = msg.replyTo.senderName.slice(0, 120);
+    payload.replyToContent = (msg.replyTo.content || '').slice(0, 200);
+    const parentId = sanitizeFirestoreId(msg.replyTo.id || '');
+    if (parentId && firestoreChatMessageIds.has(parentId)) {
+      payload.replyToId = parentId;
+    }
+  }
+
+  if (effectiveOfficial) {
+    payload.answeredBy = (msg.senderName || fbUser.displayName || 'Admin').slice(0, 120);
+    payload.answeredAt = serverTimestamp();
+  }
+
+  const docPath = `chat_messages/${safeId}`;
+  try {
+    await setDoc(doc(db, 'chat_messages', safeId), payload);
+    firestoreChatMessageIds.add(safeId);
+
+    if (
+      effectiveOfficial &&
+      msg.replyTo?.id &&
+      firestoreChatMessageIds.has(sanitizeFirestoreId(msg.replyTo.id))
+    ) {
+      const parentSafeId = sanitizeFirestoreId(msg.replyTo.id);
+      await updateDoc(doc(db, 'chat_messages', parentSafeId), {
+        status: 'answered',
+        answeredBy: (msg.senderName || fbUser.displayName || 'Admin').slice(0, 120),
+        answeredAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, docPath);
+  }
+}
+
+export async function updateChatQuestionStatusInFirestore(
+  messageId: string,
+  status: 'pending' | 'answered',
+  answeredBy?: string
+): Promise<void> {
+  const fbUser = auth.currentUser;
+  if (!fbUser || !fbUser.emailVerified) return;
+  const safeId = sanitizeFirestoreId(messageId);
+  if (!firestoreChatMessageIds.has(safeId)) return;
+
+  const docPath = `chat_messages/${safeId}`;
+  try {
+    const updatePayload: Record<string, unknown> = { status };
+    if (status === 'answered' && answeredBy) {
+      updatePayload.answeredBy = answeredBy.slice(0, 120);
+      updatePayload.answeredAt = serverTimestamp();
+    }
+    await updateDoc(doc(db, 'chat_messages', safeId), updatePayload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, docPath);
+  }
+}
+
+export async function deleteChatMessageInFirestore(messageId: string): Promise<void> {
+  const fbUser = auth.currentUser;
+  if (!fbUser || !fbUser.emailVerified) return;
+  const safeId = sanitizeFirestoreId(messageId);
+  if (!firestoreChatMessageIds.has(safeId)) return;
+
+  const docPath = `chat_messages/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'chat_messages', safeId));
+    firestoreChatMessageIds.delete(safeId);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, docPath);
   }
 }

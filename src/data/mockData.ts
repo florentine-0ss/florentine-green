@@ -12,7 +12,8 @@ import {
   DamagedStockItem,
   StockAlert,
   FinancialRecord,
-  SalesReceipt
+  SalesReceipt,
+  CountryLocation
 } from '../types';
 
 export const INITIAL_PRODUCTS: Product[] = [
@@ -1260,15 +1261,18 @@ export const FARM_PASSPORTS: Record<number, FarmPassport> = {
   }
 };
 
-export const RWANDA_LOCATIONS = [
-  { district: 'Gasabo', sectors: ['Kacyiru', 'Kimihurura', 'Kibagabaga', 'Gisozi', 'Nyarutarama', 'Remera', 'Kinyinya'], fee: 2000, estimatedHours: '1 - 2 hours', mode: 'delivery' as const },
-  { district: 'Kicukiro', sectors: ['Niboye', 'Kagarama', 'Kanombe', 'Gikondo', 'Masaka', 'Kicukiro Centre'], fee: 2500, estimatedHours: '1 - 3 hours', mode: 'delivery' as const },
-  { district: 'Nyarugenge', sectors: ['Kiyovu', 'Nyamirambo', 'Biryogo', 'Muhima', 'Kimisagara', 'Kigali CBD'], fee: 1800, estimatedHours: '1 - 2 hours', mode: 'delivery' as const },
-  { district: 'Northern Province', sectors: ['Musanze Town', 'Kinigi', 'Gicumbi', 'Burera'], fee: 4500, estimatedHours: 'Same Day / Next 8:00 AM', mode: 'delivery' as const },
-  { district: 'Western Province', sectors: ['Rubavu / Gisenyi', 'Karongi / Kibuye', 'Rusizi / Kamembe'], fee: 5500, estimatedHours: 'Next Morning 8:30 AM', mode: 'delivery' as const },
-  { district: 'Southern Province', sectors: ['Huye / Butare', 'Muhanga / Gitarama', 'Nyanza', 'Nyamagabe'], fee: 4500, estimatedHours: 'Same Day Afternoon / 9:00 AM', mode: 'delivery' as const },
-  { district: 'Eastern Province', sectors: ['Rwamagana', 'Kayonza', 'Nyagatare', 'Bugesera / Nyamata'], fee: 4000, estimatedHours: '2 - 4 hours', mode: 'delivery' as const },
-  { district: 'Pickup Hubs (0 Fee)', sectors: ['Kigali Heights Cold Locker', 'Kimironko Farm Stand', 'Musanze Cooperative Depot'], fee: 0, estimatedHours: 'Ready in 30 mins', mode: 'pickup' as const },
-  { district: 'Diaspora Gift Delivery', sectors: ['Send to Family in Kigali', 'Send to Family Upcountry', 'Corporate Gift Box (All Rwanda)'], fee: 2500, estimatedHours: 'Delivered with Photo Proof', mode: 'diaspora' as const }
+export const INITIAL_COUNTRY_LOCATIONS: CountryLocation[] = [
+  { id: 'loc-gasabo', country: 'Rwanda', province: 'Kigali City', district: 'Gasabo', sectors: ['Kacyiru', 'Kimihurura', 'Kibagabaga', 'Gisozi', 'Nyarutarama', 'Remera', 'Kinyinya'], fee: 2000, estimatedHours: '1 - 2 hours', mode: 'delivery', isActive: true },
+  { id: 'loc-kicukiro', country: 'Rwanda', province: 'Kigali City', district: 'Kicukiro', sectors: ['Niboye', 'Kagarama', 'Kanombe', 'Gikondo', 'Masaka', 'Kicukiro Centre'], fee: 2500, estimatedHours: '1 - 3 hours', mode: 'delivery', isActive: true },
+  { id: 'loc-nyarugenge', country: 'Rwanda', province: 'Kigali City', district: 'Nyarugenge', sectors: ['Kiyovu', 'Nyamirambo', 'Biryogo', 'Muhima', 'Kimisagara', 'Kigali CBD'], fee: 1800, estimatedHours: '1 - 2 hours', mode: 'delivery', isActive: true },
+  { id: 'loc-northern', country: 'Rwanda', province: 'Northern Province', district: 'Northern Province', sectors: ['Musanze Town', 'Kinigi', 'Gicumbi', 'Burera'], fee: 4500, estimatedHours: 'Same Day / Next 8:00 AM', mode: 'delivery', isActive: true },
+  { id: 'loc-western', country: 'Rwanda', province: 'Western Province', district: 'Western Province', sectors: ['Rubavu / Gisenyi', 'Karongi / Kibuye', 'Rusizi / Kamembe'], fee: 5500, estimatedHours: 'Next Morning 8:30 AM', mode: 'delivery', isActive: true },
+  { id: 'loc-southern', country: 'Rwanda', province: 'Southern Province', district: 'Southern Province', sectors: ['Huye / Butare', 'Muhanga / Gitarama', 'Nyanza', 'Nyamagabe'], fee: 4500, estimatedHours: 'Same Day Afternoon / 9:00 AM', mode: 'delivery', isActive: true },
+  { id: 'loc-eastern', country: 'Rwanda', province: 'Eastern Province', district: 'Eastern Province', sectors: ['Rwamagana', 'Kayonza', 'Nyagatare', 'Bugesera / Nyamata'], fee: 4000, estimatedHours: '2 - 4 hours', mode: 'delivery', isActive: true },
+  { id: 'loc-pickup', country: 'Rwanda', province: 'Pickup Hubs', district: 'Pickup Hubs (0 Fee)', sectors: ['Kigali Heights Cold Locker', 'Kimironko Farm Stand', 'Musanze Cooperative Depot'], fee: 0, estimatedHours: 'Ready in 30 mins', mode: 'pickup', isActive: true },
+  { id: 'loc-diaspora', country: 'Rwanda', province: 'International / Diaspora', district: 'Diaspora Gift Delivery', sectors: ['Send to Family in Kigali', 'Send to Family Upcountry', 'Corporate Gift Box (All Rwanda)'], fee: 2500, estimatedHours: 'Delivered with Photo Proof', mode: 'diaspora', isActive: true }
 ];
+
+export const RWANDA_LOCATIONS = INITIAL_COUNTRY_LOCATIONS;
+
 

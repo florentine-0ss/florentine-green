@@ -12,7 +12,7 @@ import {
   INITIAL_FINANCIAL_RECORDS,
   INITIAL_RECEIPTS,
   DEFAULT_ROLE_PERMISSIONS,
-  RWANDA_LOCATIONS
+  INITIAL_COUNTRY_LOCATIONS
 } from './data/mockData';
 import { TRANSLATIONS } from './data/translations';
 import { 
@@ -34,7 +34,8 @@ import {
   FinancialRecord,
   SalesReceipt,
   ReceiptFeedback,
-  DeliveryZoneSelection
+  DeliveryZoneSelection,
+  CountryLocation
 } from './types';
 
 // Components
@@ -88,6 +89,7 @@ export default function App() {
   const [activities, setActivities] = useState<SystemActivity[]>(INITIAL_ACTIVITIES);
   const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
+  const [countryLocations, setCountryLocations] = useState<CountryLocation[]>(INITIAL_COUNTRY_LOCATIONS);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [dbHealth, setDbHealth] = useState<DatabaseHealth | null>(null);
 
@@ -116,13 +118,43 @@ export default function App() {
   const manualSessionRef = useRef<boolean>(false);
 
   const openCommunityChat = () => {
-    if (!currentUser) {
-      setOpenChatAfterLogin(true);
-      setIsAuthOpen(true);
-      showToast('Please sign in to join the member chat');
-      return;
-    }
     setIsCommunityChatOpen(true);
+  };
+
+  const handleQuickJoinChatCustomer = (displayName: string) => {
+    const cleanName = displayName.trim().slice(0, 60);
+    if (!cleanName) return;
+    const joinedCustomer: User = {
+      id: `usr-joined-${Date.now().toString().slice(-5)}`,
+      name: cleanName,
+      email: `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '.')}@guest.fofogreen.rw`,
+      phone: '+250 788 000 000',
+      role: 'customer',
+      joinedDate: 'Just joined',
+      ordersCount: 0,
+      status: 'active',
+      department: 'Public Chat Member',
+      permissions: DEFAULT_ROLE_PERMISSIONS.customer,
+      lastLogin: 'Just now',
+    };
+    manualSessionRef.current = true;
+    setCurrentUser(joinedCustomer);
+    setUsers((prev) => [joinedCustomer, ...prev.filter((u) => u.id !== joinedCustomer.id)]);
+    setPermittedOnly(true);
+    showToast(`Joined chat as ${cleanName}`);
+
+    const joinAct: SystemActivity = {
+      id: `ACT-JOIN-${Date.now().toString().slice(-4)}`,
+      title: 'Customer Joined Public Chat',
+      detail: `${cleanName} joined the public community support chat.`,
+      time: 'Just now',
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      type: 'user',
+      status: 'info',
+      actor: cleanName,
+      actorRole: 'customer',
+    };
+    setActivities((prev) => [joinAct, ...prev]);
   };
 
   const openCustomerMarket = () => {
@@ -161,11 +193,12 @@ export default function App() {
         const health = await api.checkHealth();
         if (health) setDbHealth(health);
 
-        const [dbProds, dbOrds, dbRevs, dbActs] = await Promise.all([
+        const [dbProds, dbOrds, dbRevs, dbActs, dbLocs] = await Promise.all([
           api.getProducts(),
           api.getOrders(),
           api.getReviews(),
-          api.getActivities()
+          api.getActivities(),
+          api.getLocations()
         ]);
 
         if (dbProds && dbProds.length > 0) {
@@ -175,6 +208,7 @@ export default function App() {
         if (dbOrds && dbOrds.length > 0) setOrders(dbOrds);
         if (dbRevs && dbRevs.length > 0) setReviews(dbRevs);
         if (dbActs && dbActs.length > 0) setActivities(dbActs);
+        if (dbLocs && dbLocs.length > 0) setCountryLocations(dbLocs);
       } catch (err) {
         console.warn('[Fofo] Backend initial sync — checking offline cache:', err);
         const cachedProds = offlineCache.loadProducts();
@@ -226,7 +260,7 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSystemLoginOpen, setIsSystemLoginOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [adminInitialTab, setAdminInitialTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat'>('activity');
+  const [adminInitialTab, setAdminInitialTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat' | 'locations'>('activity');
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [checkoutDiscount, setCheckoutDiscount] = useState(0);
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<PaymentMethod>('mtn');
@@ -290,7 +324,7 @@ export default function App() {
       const zoneParam = params.get('zone');
 
       if (zoneParam) {
-        const matchedZone = RWANDA_LOCATIONS.find(
+        const matchedZone = countryLocations.find(
           (l) => l.district.toLowerCase() === zoneParam.toLowerCase()
         );
         if (matchedZone) {
@@ -347,6 +381,12 @@ export default function App() {
       setQuickViewProduct(product);
     }
   };
+
+  // Active Country Locations exposed to customers and storefront
+  const activeCountryLocations = useMemo(() => {
+    const active = countryLocations.filter((loc) => loc.isActive !== false);
+    return active.length > 0 ? active : countryLocations;
+  }, [countryLocations]);
 
   // Translations shortcut
   const t = TRANSLATIONS[currentLang];
@@ -1188,19 +1228,68 @@ export default function App() {
     setActivities((prev) => [newAct, ...prev]);
   };
 
+  // Admin Country Location Management Handlers
+  const handleAddCountryLocation = async (locPayload: Omit<CountryLocation, 'id'>) => {
+    const role = currentUser?.role || 'admin';
+    const created = await api.addLocation(locPayload, role);
+    setCountryLocations((prev) => [created, ...prev]);
+    showToast(`Added location: ${created.district} (${created.country})`);
+
+    const newAct: SystemActivity = {
+      id: `ACT-LOC-${Date.now().toString().slice(-4)}`,
+      title: 'Country Delivery Location Added',
+      detail: `${created.district} (${created.country} · ${created.province}) added with ${created.sectors.length} sectors/hubs at ${created.fee.toLocaleString()} FRW.`,
+      time: 'Just now',
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      type: 'delivery',
+      status: 'success',
+      actor: currentUser?.name || 'System Admin',
+      actorRole: 'admin',
+      metadata: { locationId: created.id, country: created.country, district: created.district }
+    };
+    setActivities((prev) => [newAct, ...prev]);
+  };
+
+  const handleUpdateCountryLocation = async (id: string, updates: Partial<CountryLocation>) => {
+    const role = currentUser?.role || 'admin';
+    const updated = await api.updateLocation(id, updates, role);
+    setCountryLocations((prev) => prev.map((l) => (l.id === id ? updated : l)));
+
+    if (selectedLocation.district === updated.district && updated.isActive) {
+      setSelectedLocation((prev) => ({
+        district: updated.district,
+        sector: updated.sectors.includes(prev.sector) ? prev.sector : (updated.sectors[0] || updated.district),
+        fee: updated.fee,
+        estimatedHours: updated.estimatedHours,
+        fulfillmentMode: updated.mode || 'delivery',
+      }));
+    }
+    showToast(`Updated location: ${updated.district}`);
+  };
+
+  const handleDeleteCountryLocation = async (id: string) => {
+    const role = currentUser?.role || 'admin';
+    const target = countryLocations.find((l) => l.id === id);
+    await api.deleteLocation(id, role);
+    setCountryLocations((prev) => prev.filter((l) => l.id !== id));
+    showToast(`Removed location: ${target?.district || id}`);
+  };
+
   const handleResetDatabase = async () => {
     const success = await api.resetDatabase();
     if (success) {
-      const [freshProds, freshOrders, freshRevs, freshActs] = await Promise.all([
+      const [freshProds, freshOrders, freshRevs, freshActs, freshLocs] = await Promise.all([
         api.getProducts(),
         api.getOrders(),
         api.getReviews(),
-        api.getActivities()
+        api.getActivities(),
+        api.getLocations()
       ]);
       setProducts(freshProds);
       setOrders(freshOrders);
       setReviews(freshRevs);
       setActivities(freshActs);
+      if (freshLocs && freshLocs.length > 0) setCountryLocations(freshLocs);
       showToast('Database reset to fresh Rwandan farm catalog seed');
     }
   };
@@ -1268,6 +1357,18 @@ export default function App() {
                 className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer"
               >
                 Staff Access Rights
+              </button>
+
+              <button
+                onClick={() => {
+                  setAdminInitialTab('locations');
+                  setIsAdminOpen(true);
+                }}
+                className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                title="Add or manage country delivery locations"
+              >
+                <MapPin className="w-3.5 h-3.5 text-emerald-300" />
+                <span>Country Locations ({countryLocations.length})</span>
               </button>
 
               <button
@@ -1611,6 +1712,7 @@ export default function App() {
         currentLang={currentLang}
         selectedLocation={selectedLocation}
         onSelectLocation={setSelectedLocation}
+        locations={activeCountryLocations}
         onShopClick={() => {
           const el = document.getElementById('shop');
           if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -1667,6 +1769,7 @@ export default function App() {
         discountAmount={checkoutDiscount}
         initialPaymentMethod={checkoutPaymentMethod}
         selectedLocation={selectedLocation}
+        locations={activeCountryLocations}
         onOrderComplete={handleOrderComplete}
         onReturnToCart={() => {
           setIsCheckoutOpen(false);
@@ -1712,6 +1815,10 @@ export default function App() {
         onUpdateUserRole={handleUpdateUserRole}
         onUpdateUserPermissions={handleUpdateUserPermissions}
         onAddStaffUser={handleAddStaffUser}
+        locations={countryLocations}
+        onAddLocation={handleAddCountryLocation}
+        onUpdateLocation={handleUpdateCountryLocation}
+        onDeleteLocation={handleDeleteCountryLocation}
         financialRecords={financialRecords}
         receipts={receiptsHistory}
         activities={activities}
@@ -1827,6 +1934,7 @@ export default function App() {
         onClose={() => setIsCommunityChatOpen(false)}
         currentUser={currentUser}
         onOpenAuth={() => setIsAuthOpen(true)}
+        onQuickJoinCustomer={handleQuickJoinChatCustomer}
         availableProducts={products}
         joinedUsers={users}
       />
@@ -1837,6 +1945,7 @@ export default function App() {
         onClose={() => setIsAccessHubOpen(false)}
         selectedLocation={selectedLocation}
         onSelectLocation={setSelectedLocation}
+        locations={activeCountryLocations}
         products={products}
         cart={cart}
         isCompactMode={isHeroMinimized}

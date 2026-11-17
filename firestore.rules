@@ -113,6 +113,26 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['id', 'channelId', 'senderUid', 'senderName', 'senderRole', 'messageType', 'content', 'isOfficialReply', 'status', 'createdAt'])
+        && data.keys().hasOnly(['id', 'channelId', 'senderUid', 'senderName', 'senderRole', 'messageType', 'content', 'isOfficialReply', 'status', 'replyToId', 'replyToSenderName', 'replyToContent', 'answeredBy', 'answeredAt', 'createdAt'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 80 && data.id.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.channelId is string && data.channelId.size() <= 60 && data.channelId in ['general', 'fresh-harvest', 'delivery-kigali', 'staff-internal', 'staff-support']
+        && data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128 && data.senderUid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 120
+        && data.senderRole is string && data.senderRole in ['customer', 'admin', 'stock_manager', 'cashier', 'sales_attendant', 'accountant']
+        && data.messageType is string && data.messageType in ['question', 'reply', 'answer', 'message']
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 2000
+        && data.isOfficialReply is bool
+        && data.status is string && data.status in ['pending', 'answered', 'open']
+        && (!('replyToId' in data) || (data.replyToId is string && data.replyToId.size() >= 1 && data.replyToId.size() <= 80 && data.replyToId.matches('^[a-zA-Z0-9_\\-]+$')))
+        && (!('replyToSenderName' in data) || (data.replyToSenderName is string && data.replyToSenderName.size() <= 120))
+        && (!('replyToContent' in data) || (data.replyToContent is string && data.replyToContent.size() <= 200))
+        && (!('answeredBy' in data) || (data.answeredBy is string && data.answeredBy.size() <= 120))
+        && (!('answeredAt' in data) || data.answeredAt is timestamp)
+        && data.createdAt is timestamp;
+    }
+
     // Users collection: PII isolated strictly to owner or verified Admin
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
@@ -211,6 +231,48 @@ service cloud.firestore {
         && incoming().authorUid == request.auth.uid
         && incoming().createdAt == request.time;
       allow update, delete: if isValidId(reviewId) && (isAdmin() || (isVerified() && existing().authorUid == request.auth.uid));
+    }
+
+    // Public Community & Q&A Chat:
+    // - Anyone who joins can read all posted messages (no PII stored).
+    // - Verified users can post questions, general messages, or reply to non-question posts.
+    // - ONLY verified Admins can provide answers to questions or mark questions answered.
+    match /chat_messages/{messageId} {
+      allow get: if isValidId(messageId);
+      allow list: if true;
+      allow create: if isValidId(messageId)
+        && isVerified()
+        && isValidChatMessage(incoming())
+        && incoming().senderUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && (
+          isAdmin() ||
+          (
+            incoming().senderRole == 'customer'
+            && incoming().messageType in ['question', 'reply', 'message']
+            && incoming().isOfficialReply == false
+            && (
+              (incoming().messageType == 'question' && incoming().status == 'pending') ||
+              (incoming().messageType in ['reply', 'message'] && incoming().status == 'open')
+            )
+            && (
+              !('replyToId' in incoming()) ||
+              (
+                exists(/databases/$(database)/documents/chat_messages/$(incoming().replyToId)) &&
+                get(/databases/$(database)/documents/chat_messages/$(incoming().replyToId)).data.messageType != 'question'
+              )
+            )
+          )
+        );
+      allow update: if isValidId(messageId)
+        && isVerified()
+        && isValidChatMessage(incoming())
+        && incoming().senderUid == existing().senderUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().messageType == existing().messageType
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'answeredBy', 'answeredAt'])
+        && isAdmin();
+      allow delete: if isValidId(messageId) && isAdmin();
     }
 
     // Activities audit log: admins only
