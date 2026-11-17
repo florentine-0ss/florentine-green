@@ -1,13 +1,47 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  ShoppingCart, Heart, User as UserIcon, Globe, ShieldCheck, 
-  Menu, X, Palette, Navigation, Minimize2, Maximize2, ChevronDown,
-  Sparkles, Check, LogOut, PackageCheck, Layers, Download, Compass, MessageSquare,
-  Volume2, VolumeX, Radio, Users
+import {
+  ShoppingCart,
+  User as UserIcon,
+  Globe,
+  ShieldCheck,
+  Menu,
+  X,
+  Palette,
+  Navigation,
+  Minimize2,
+  Maximize2,
+  ChevronDown,
+  LogOut,
+  Download,
+  Compass,
+  MessageSquare,
+  Heart,
 } from 'lucide-react';
 import { Language, User, ColorTheme } from '../types';
 import { TRANSLATIONS } from '../data/translations';
 import { useRealtimeCommunity } from '../context/RealtimeCommunityContext';
+
+export type NavbarSelection =
+  | 'home'
+  | 'shop'
+  | 'baskets'
+  | 'delivery'
+  | 'about'
+  | 'contact'
+  | 'access-anywhere'
+  | 'community-chat'
+  | 'order-tracker'
+  | 'wishlist'
+  | 'cart'
+  | 'theme-selector'
+  | 'toggle-banner'
+  | 'download-zip'
+  | 'role-admin'
+  | 'role-stock'
+  | 'role-cashier'
+  | 'role-sales'
+  | 'role-accountant'
+  | 'role-customer';
 
 interface NavbarProps {
   currentLang: Language;
@@ -33,7 +67,25 @@ interface NavbarProps {
   onOpenCustomerFruitMarket?: () => void;
   onOpenCommunityChat?: () => void;
   onOpenAccessHub?: () => void;
+  activeNav?: NavbarSelection;
+  onSelectNav?: (selection: NavbarSelection) => void;
 }
+
+const SECTION_IDS: Array<'home' | 'shop' | 'baskets' | 'delivery' | 'about' | 'contact'> = [
+  'home',
+  'shop',
+  'baskets',
+  'delivery',
+  'about',
+  'contact',
+];
+
+const PRIMARY_TABS: Array<{ id: 'home' | 'shop' | 'delivery' | 'community-chat'; labelKey?: 'home' | 'shop' | 'delivery'; fallback: string }> = [
+  { id: 'home', labelKey: 'home', fallback: 'Home' },
+  { id: 'shop', labelKey: 'shop', fallback: 'Shop' },
+  { id: 'delivery', labelKey: 'delivery', fallback: 'Delivery' },
+  { id: 'community-chat', fallback: 'Support Chat' },
+];
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentLang,
@@ -47,7 +99,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onLogout,
   activitiesCount = 0,
-  currentTheme,
   onOpenThemeSelector,
   onOpenOrderTracker,
   isHeroMinimized = true,
@@ -58,37 +109,63 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenAccountant,
   onOpenCustomerFruitMarket,
   onOpenCommunityChat,
-  onOpenAccessHub
+  onOpenAccessHub,
+  activeNav,
+  onSelectNav,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-  const [showRadarDropdown, setShowRadarDropdown] = useState(false);
-  const [selectedNavOption, setSelectedNavOption] = useState<string>('home');
+  const [selectedNavOption, setSelectedNavOption] = useState<NavbarSelection>(activeNav || 'home');
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const radarRef = useRef<HTMLDivElement>(null);
+  const manualSelectLockRef = useRef<number>(0);
   const t = TRANSLATIONS[currentLang].nav;
 
-  // Real-time Community Presence & Unread Hook
-  const { 
-    onlineUsers, 
-    unreadCount, 
-    openChatForResponse, 
-    soundEnabled, 
-    toggleSound 
-  } = useRealtimeCommunity();
+  const { unreadCount } = useRealtimeCommunity();
 
-  // Close dropdown on outside click
+  useEffect(() => {
+    if (activeNav) {
+      setSelectedNavOption(activeNav);
+    }
+  }, [activeNav]);
+
+  // Close user menu on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setUserDropdownOpen(false);
       }
-      if (radarRef.current && !radarRef.current.contains(e.target as Node)) {
-        setShowRadarDropdown(false);
-      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Track visible page section on scroll so selection state stays accurate
+  useEffect(() => {
+    const handleScroll = () => {
+      if (Date.now() < manualSelectLockRef.current) return;
+
+      if (window.scrollY < 140) {
+        setSelectedNavOption('home');
+        return;
+      }
+
+      const viewportAnchor = 180;
+      let currentSection: NavbarSelection = 'home';
+
+      for (const id of SECTION_IDS) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.top <= viewportAnchor) {
+          currentSection = id;
+        }
+      }
+
+      setSelectedNavOption(currentSection);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   const scrollTo = (id: string) => {
@@ -103,16 +180,16 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
-  const handleNavSelect = (value: string) => {
+  const handleNavSelect = (value: NavbarSelection) => {
     if (!value) return;
+    manualSelectLockRef.current = Date.now() + 900;
     setSelectedNavOption(value);
+    onSelectNav?.(value);
+    setMobileMenuOpen(false);
 
-    // 1. Store Sections
     if (['home', 'shop', 'baskets', 'delivery', 'about', 'contact'].includes(value)) {
       scrollTo(value);
-    } 
-    // 2. Quick Features & Tools
-    else if (value === 'access-anywhere') {
+    } else if (value === 'access-anywhere') {
       onOpenAccessHub?.();
     } else if (value === 'community-chat') {
       onOpenCommunityChat?.();
@@ -128,9 +205,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       onOpenWishlist();
     } else if (value === 'cart') {
       onOpenCart();
-    }
-    // 3. Operational Role Workspaces
-    else if (value === 'role-admin') {
+    } else if (value === 'role-admin') {
       onOpenAdmin();
     } else if (value === 'role-stock') {
       onOpenStockManager?.();
@@ -143,125 +218,143 @@ export const Navbar: React.FC<NavbarProps> = ({
     } else if (value === 'role-customer') {
       onOpenCustomerFruitMarket?.();
     }
-
-    // Keep active option clean
-    setTimeout(() => {
-      setSelectedNavOption('home');
-    }, 1000);
   };
 
+  const isPrimarySelected = (id: 'home' | 'shop' | 'delivery' | 'community-chat') =>
+    selectedNavOption === id;
+
+  const isMoreSelectionActive = !PRIMARY_TABS.some((tab) => tab.id === selectedNavOption);
+
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-stone-200/90 shadow-2xs transition-all">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-stone-200 transition-all">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-2">
-          
-          {/* 1. BRAND LOGO (Left) */}
-          <div 
-            className="flex items-center gap-2.5 cursor-pointer shrink-0 select-none group" 
-            onClick={() => scrollTo('home')}
+        <div className="flex items-center justify-between h-16 gap-3">
+          {/* 1. Brand Identity */}
+          <button
+            type="button"
+            onClick={() => handleNavSelect('home')}
+            className="flex items-center gap-2.5 cursor-pointer shrink-0 select-none group text-left"
             title="Fofo Green Rwanda"
           >
             <div className="w-9 h-9 rounded-xl bg-theme-primary flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
-                <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+              <svg
+                className="w-5 h-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z" />
+                <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12" />
               </svg>
             </div>
-            
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-lg text-stone-900 tracking-tight font-serif">Fofo</span>
-                <span className="text-[10px] uppercase tracking-wider font-extrabold px-1.5 py-0.2 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  Green
-                </span>
-              </div>
-              <span className="text-[10px] text-stone-500 font-medium leading-none hidden sm:inline">
-                Kigali · Organic Farm Direct
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-extrabold text-lg text-stone-900 tracking-tight font-serif">
+                Fofo
+              </span>
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+                Green
               </span>
             </div>
-          </div>
+          </button>
 
-          {/* 2. UNIFIED NAVIGATION SELECT (Drastically Reduces Crowded Buttons) */}
-          <div className="flex items-center gap-2 flex-1 max-w-xs sm:max-w-md mx-2 sm:mx-4">
-            <div className="relative flex items-center w-full bg-stone-100 hover:bg-stone-200/70 border border-stone-300/80 rounded-xl px-2.5 py-1.5 transition-all shadow-2xs group focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500">
-              <Compass className="w-4 h-4 text-theme-primary shrink-0 mr-1.5 transition-transform group-hover:rotate-45" />
-              
-              <div className="flex flex-col flex-1 min-w-0">
-                <div className="flex items-center justify-between text-[9px] uppercase tracking-wider font-extrabold text-stone-500 leading-none mb-0.5">
-                  <span>Navigation Menu</span>
-                  <span className="text-[8px] text-emerald-700 font-bold hidden sm:inline">Select Option</span>
-                </div>
-                
-                <select
-                  value={selectedNavOption}
-                  onChange={(e) => handleNavSelect(e.target.value)}
-                  className="bg-transparent text-stone-900 font-bold outline-hidden cursor-pointer text-xs w-full appearance-none pr-4"
-                  aria-label="Navigation select options to reduce button clutter"
+          {/* 2. Primary Navigation Selection Bar + Unified Menu Selector */}
+          <nav
+            aria-label="Primary navigation"
+            className="hidden lg:flex items-center gap-1 p-1 rounded-xl bg-stone-100/90 border border-stone-200"
+          >
+            {PRIMARY_TABS.map((tab) => {
+              const selected = isPrimarySelected(tab.id);
+              const label = tab.labelKey ? t[tab.labelKey] || tab.fallback : tab.fallback;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  aria-current={selected ? 'page' : undefined}
+                  onClick={() => handleNavSelect(tab.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer flex items-center gap-1.5 ${
+                    selected
+                      ? 'bg-emerald-800 text-white shadow-xs'
+                      : 'text-stone-700 hover:text-stone-950 hover:bg-white/70'
+                  }`}
                 >
-                  <optgroup label="── Store Pages & Catalog ──">
-                    <option value="home">🏡 Home & Fresh Produce</option>
-                    <option value="shop">🥬 Shop All Organic Items</option>
-                    <option value="baskets">🧺 Recipe Baskets & Kits</option>
-                    <option value="delivery">🛵 Kigali Express Delivery</option>
-                    <option value="about">🌿 About Fofo Green & Rwandan Farms</option>
-                    <option value="contact">📞 Contact & WhatsApp Order</option>
-                  </optgroup>
+                  <span>{label}</span>
+                  {tab.id === 'community-chat' && unreadCount > 0 && (
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold tabular-nums ${
+                        selected
+                          ? 'bg-white/20 text-white'
+                          : 'bg-emerald-100 text-emerald-900'
+                      }`}
+                    >
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
 
-                  <optgroup label="── Quick Features & Actions ──">
-                    <option value="access-anywhere">🌍 Access Anywhere (Offline, QR, Zones)</option>
-                    <option value="community-chat">💬 Member Chat & Community Lounge (Live)</option>
-                    <option value="order-tracker">📍 Live Order GPS Radar</option>
-                    <option value="toggle-banner">🖼️ {isHeroMinimized ? 'Expand Full Banner' : 'Compact Store View'}</option>
-                    <option value="download-zip">📦 Download System Folder (ZIP)</option>
-                    <option value="theme-selector">🎨 Color Theme Customizer</option>
-                    <option value="wishlist">❤️ Wishlist ({wishlistCount} items)</option>
-                    <option value="cart">🛒 Shopping Basket ({cartCount} items)</option>
-                  </optgroup>
-
-                  <optgroup label="── 6 System Role Workspaces ──">
-                    <option value="role-admin">👑 1. Admin Control & Profit Reports</option>
-                    <option value="role-stock">📦 2. Stock Manager (PO & Damaged Stock)</option>
-                    <option value="role-cashier">💳 3. Cashier POS Register (Cash & MoMo)</option>
-                    <option value="role-sales">🤝 4. Sales Floor Attendant (Basket Assist)</option>
-                    <option value="role-accountant">📊 5. Accountant Financial P&L & Margins</option>
-                    <option value="role-customer">🍎 6. Customer Fruit Market & Reviews</option>
-                  </optgroup>
-                </select>
-              </div>
-
-              <ChevronDown className="w-3.5 h-3.5 text-stone-500 absolute right-2.5 pointer-events-none" />
+            <div className="relative flex items-center">
+              <select
+                value={isMoreSelectionActive ? selectedNavOption : ''}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleNavSelect(e.target.value as NavbarSelection);
+                  }
+                }}
+                aria-label="More store sections and tools"
+                className={`appearance-none pl-3 pr-7 py-1.5 rounded-lg text-xs font-semibold cursor-pointer outline-hidden transition-all ${
+                  isMoreSelectionActive
+                    ? 'bg-emerald-800 text-white shadow-xs'
+                    : 'bg-transparent text-stone-700 hover:text-stone-950 hover:bg-white/70'
+                }`}
+              >
+                <option value="" disabled className="text-stone-500 bg-white">
+                  More...
+                </option>
+                <optgroup label="Store Sections" className="text-stone-900 bg-white">
+                  <option value="baskets">Recipe Baskets &amp; Kits</option>
+                  <option value="about">About Our Farms</option>
+                  <option value="contact">Contact &amp; WhatsApp</option>
+                </optgroup>
+                <optgroup label="Quick Tools" className="text-stone-900 bg-white">
+                  <option value="access-anywhere">Access Anywhere (Zones &amp; QR)</option>
+                  <option value="order-tracker">Track Live Order</option>
+                  <option value="wishlist">Saved Wishlist ({wishlistCount})</option>
+                  <option value="theme-selector">Color Theme</option>
+                  <option value="toggle-banner">
+                    {isHeroMinimized ? 'Expand Hero Banner' : 'Compact Store View'}
+                  </option>
+                  <option value="download-zip">Download System (ZIP)</option>
+                </optgroup>
+                <optgroup label="Workspaces" className="text-stone-900 bg-white">
+                  <option value="role-admin">Admin Control Center</option>
+                  <option value="role-stock">Stock Manager</option>
+                  <option value="role-cashier">Cashier POS</option>
+                  <option value="role-sales">Sales Attendant</option>
+                  <option value="role-accountant">Accountant Ledger</option>
+                  <option value="role-customer">Customer Fruit Market</option>
+                </optgroup>
+              </select>
+              <ChevronDown
+                className={`w-3.5 h-3.5 absolute right-2 pointer-events-none ${
+                  isMoreSelectionActive ? 'text-white' : 'text-stone-500'
+                }`}
+              />
             </div>
+          </nav>
 
-            {/* Subtle High-Frequency Shortcuts (Only 2 clean text links on wide desktops, no button clutter) */}
-            <nav className="hidden 2xl:flex items-center gap-1 shrink-0">
-              <button
-                onClick={() => scrollTo('shop')}
-                className="px-2.5 py-1 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-bold text-xs transition-colors cursor-pointer"
-              >
-                {t.shop}
-              </button>
-              <button
-                onClick={() => scrollTo('baskets')}
-                className="px-2.5 py-1 rounded-lg text-stone-700 hover:text-emerald-800 hover:bg-stone-100 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1"
-              >
-                <span>Kits</span>
-                <span className="px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 text-[8px] font-black uppercase">
-                  New
-                </span>
-              </button>
-            </nav>
-          </div>
-
-          {/* 3. STREAMLINED UTILITY CONTROLS (Right - Only Core Actions, No Button Overload) */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-
-            {/* Language Selector (Clean Pill) */}
-            <div className="relative flex items-center bg-stone-100/90 rounded-xl px-2 py-1.5 border border-stone-200 text-xs">
+          {/* 3. Streamlined Utility Controls */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Compact Language Selector */}
+            <div className="hidden sm:flex items-center bg-stone-100 rounded-xl px-2.5 py-1.5 border border-stone-200 text-xs">
               <Globe className="w-3.5 h-3.5 text-stone-500 mr-1 shrink-0" />
               <select
                 value={currentLang}
                 onChange={(e) => onLanguageChange(e.target.value as Language)}
-                className="bg-transparent text-stone-800 font-bold outline-hidden cursor-pointer uppercase text-xs pr-0.5"
+                className="bg-transparent text-stone-800 font-semibold outline-hidden cursor-pointer uppercase text-xs"
                 aria-label="Select language"
               >
                 <option value="en">EN</option>
@@ -272,447 +365,335 @@ export const Navbar: React.FC<NavbarProps> = ({
               </select>
             </div>
 
-            {/* Active Now Presence Radar (Desktop) */}
-            <div className="relative hidden md:block" ref={radarRef}>
-              <button
-                type="button"
-                onClick={() => setShowRadarDropdown(!showRadarDropdown)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition-all shadow-2xs cursor-pointer select-none"
-                title="View live active members in Kigali"
-              >
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>{onlineUsers.length} Active Now</span>
-                <ChevronDown className="w-3 h-3 text-emerald-700" />
-              </button>
-
-              {/* Active Users Popover */}
-              {showRadarDropdown && (
-                <div className="absolute right-0 mt-2 w-72 bg-stone-900 text-white rounded-2xl shadow-2xl border border-stone-700 p-3.5 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between pb-2 border-b border-stone-800">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                      <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-400">
-                        Live Members ({onlineUsers.length})
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={toggleSound}
-                      className="text-stone-400 hover:text-white p-1 rounded hover:bg-stone-800 cursor-pointer transition-colors"
-                      title={soundEnabled ? 'Presence sound chimes active' : 'Presence sound chimes muted'}
-                    >
-                      {soundEnabled ? (
-                        <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
-                      ) : (
-                        <VolumeX className="w-3.5 h-3.5 text-stone-500" />
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="mt-2.5 space-y-1.5 max-h-52 overflow-y-auto">
-                    {onlineUsers.length === 0 ? (
-                      <p className="text-xs text-stone-400 text-center py-3">Connecting to member lounge...</p>
-                    ) : (
-                      onlineUsers.map(u => (
-                        <div key={u.userId} className="flex items-center justify-between p-1.5 rounded-xl bg-stone-800/80 hover:bg-stone-800 border border-stone-700/40">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="relative shrink-0">
-                              <div className="w-7 h-7 rounded-full bg-emerald-800 text-emerald-200 text-xs font-bold flex items-center justify-center">
-                                {u.userName.charAt(0).toUpperCase()}
-                              </div>
-                              <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-white truncate">{u.userName}</p>
-                              <p className="text-[9px] text-emerald-400 capitalize">{u.role.replace('_', ' ')}</p>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              openChatForResponse({ user: u, channelId: 'general', prefillReply: `@${u.userName} ` });
-                              setShowRadarDropdown(false);
-                            }}
-                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold rounded-lg cursor-pointer transition-colors shadow-2xs"
-                          >
-                            Respond
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Community Live Member Chat Trigger Button with Live Unread Pulse */}
-            {onOpenCommunityChat && (
-              <button
-                onClick={onOpenCommunityChat}
-                className="relative p-2 rounded-xl text-stone-700 hover:text-emerald-800 hover:bg-emerald-50 transition-colors cursor-pointer border border-stone-200 bg-stone-50 group"
-                aria-label="Community Live Chat"
-                title={`Open Member & Community Live Chat Lounge (${onlineUsers.length} active now)`}
-              >
-                <MessageSquare className="w-4 h-4 text-emerald-800 group-hover:scale-105 transition-transform" />
-                <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white animate-pulse" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-1.5 -left-1.5 bg-rose-600 text-white text-[9px] font-black rounded-full px-1.5 py-0.2 shadow-sm animate-bounce">
-                    {unreadCount}
-                  </span>
-                )}
-              </button>
-            )}
-
-            {/* Wishlist Button */}
+            {/* Shopping Basket Button with Selection State */}
             <button
-              onClick={onOpenWishlist}
-              className="relative p-2 rounded-xl text-stone-600 hover:text-rose-600 hover:bg-stone-100 transition-colors cursor-pointer"
-              aria-label="Wishlist"
-              title="Saved produce in wishlist"
-            >
-              <Heart className="w-4 h-4" />
-              {wishlistCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 bg-rose-600 text-white text-[9px] font-black rounded-full w-4 h-4 flex items-center justify-center shadow-xs">
-                  {wishlistCount}
-                </span>
-              )}
-            </button>
-
-            {/* Shopping Basket Button (Clear, High-Contrast) */}
-            <button
-              onClick={onOpenCart}
-              className="relative flex items-center gap-1.5 bg-theme-primary hover:opacity-95 active:scale-98 text-white px-3 sm:px-3.5 py-1.5 rounded-xl font-bold text-xs sm:text-sm shadow-xs transition-all cursor-pointer"
+              type="button"
+              onClick={() => handleNavSelect('cart')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs whitespace-nowrap shrink-0 transition-all cursor-pointer tabular-nums ${
+                selectedNavOption === 'cart'
+                  ? 'bg-stone-900 text-white ring-2 ring-emerald-600/30'
+                  : 'bg-theme-primary hover:opacity-95 text-white'
+              }`}
               aria-label="Shopping Cart"
-              title="Open shopping cart drawer"
             >
               <ShoppingCart className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">{t.cart}</span>
-              <span className="bg-white/25 text-white text-xs font-black px-1.5 py-0.2 rounded-full min-w-4 text-center">
+              <span className="bg-white/20 text-white text-xs font-bold px-1.5 py-0.2 rounded-full min-w-4 text-center">
                 {cartCount}
               </span>
             </button>
 
-            {/* User Account / Admin Capsule with Luxury Dropdown */}
+            {/* User Account / Sign In */}
             <div className="relative" ref={dropdownRef}>
               {currentUser ? (
                 <button
+                  type="button"
                   onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                  className={`flex items-center gap-1.5 p-1 sm:px-2 rounded-xl border transition-all cursor-pointer ${
-                    currentUser.role === 'admin'
-                      ? 'border-amber-300 bg-amber-50/80 hover:bg-amber-100 text-amber-950 shadow-2xs'
-                      : 'border-stone-200 hover:bg-stone-100 text-stone-700'
+                  className={`flex items-center gap-1.5 px-2 py-1.5 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                    userDropdownOpen
+                      ? 'border-emerald-700 bg-emerald-50 text-emerald-950'
+                      : 'border-stone-200 bg-white hover:bg-stone-50 text-stone-800'
                   }`}
-                  title={currentUser.role === 'admin' ? "Administrator account menu" : "Customer account menu"}
+                  title="Account menu"
                 >
-                  <div className={`w-6 h-6 rounded-lg font-bold flex items-center justify-center text-xs text-white ${
-                    currentUser.role === 'admin' ? 'bg-amber-600' :
-                    currentUser.role === 'stock_manager' ? 'bg-blue-600' :
-                    currentUser.role === 'cashier' ? 'bg-emerald-600' :
-                    currentUser.role === 'sales_attendant' ? 'bg-violet-600' :
-                    currentUser.role === 'accountant' ? 'bg-teal-600' : 'bg-emerald-700'
-                  }`}>
-                    {currentUser.name.charAt(0)}
-                  </div>
-                  
-                  <div className="hidden sm:flex flex-col text-left">
-                    <span className="text-xs font-bold text-stone-900 leading-tight truncate max-w-20">
-                      {currentUser.name.split(' ')[0]}
-                    </span>
-                    <span className="text-[8px] font-black uppercase tracking-wider leading-none text-emerald-800">
-                      {currentUser.role === 'admin' ? '👑 Admin' :
-                       currentUser.role === 'stock_manager' ? '📦 Stock' :
-                       currentUser.role === 'cashier' ? '💳 Cashier' :
-                       currentUser.role === 'sales_attendant' ? '🤝 Sales' :
-                       currentUser.role === 'accountant' ? '📊 Finance' : '🛒 Shopper'}
-                    </span>
-                  </div>
-                  <ChevronDown className="w-3 h-3 text-stone-500" />
+                  <span className="w-6 h-6 rounded-lg bg-emerald-800 text-white font-bold flex items-center justify-center text-xs shrink-0">
+                    {currentUser.name.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="hidden sm:inline max-w-24 truncate">
+                    {currentUser.name.split(' ')[0]}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-stone-500" />
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={onOpenAuth}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-300 hover:border-emerald-600 hover:bg-emerald-50/50 text-stone-800 text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-stone-300 hover:border-emerald-700 hover:bg-emerald-50/50 text-stone-800 text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
                 >
                   <UserIcon className="w-3.5 h-3.5 text-stone-600" />
                   <span>{t.signIn}</span>
                 </button>
               )}
 
-              {/* Luxury Dropdown Menu */}
               {userDropdownOpen && currentUser && (
-                <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-stone-200 py-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-150">
-                  
-                  {/* User Profile Header */}
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-stone-200 py-2 z-50 text-xs">
                   <div className="px-4 py-2.5 border-b border-stone-100 bg-stone-50/60">
-                    <div className="flex items-center justify-between">
-                      <p className="font-extrabold text-stone-900">{currentUser.name}</p>
-                      <span className="text-[9px] bg-emerald-700 text-white px-1.5 py-0.5 rounded-md font-black tracking-wider uppercase">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-bold text-stone-900 truncate">{currentUser.name}</p>
+                      <span className="text-[10px] text-emerald-800 font-bold uppercase shrink-0">
                         {currentUser.role.replace(/_/g, ' ')}
                       </span>
                     </div>
                     <p className="text-[11px] text-stone-500 truncate mt-0.5">{currentUser.email}</p>
                   </div>
 
-                  {/* Actions in Dropdown */}
-                  <div className="p-1 space-y-0.5">
+                  <div className="p-1.5 space-y-0.5">
                     {onOpenCommunityChat && (
                       <button
+                        type="button"
                         onClick={() => {
                           setUserDropdownOpen(false);
-                          onOpenCommunityChat();
+                          handleNavSelect('community-chat');
                         }}
-                        className="w-full text-left px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold flex items-center justify-between cursor-pointer transition-colors"
+                        className={`w-full text-left px-3 py-2 rounded-xl font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                          selectedNavOption === 'community-chat'
+                            ? 'bg-emerald-800 text-white'
+                            : 'hover:bg-stone-100 text-stone-800'
+                        }`}
                       >
                         <span className="flex items-center gap-2">
-                          <MessageSquare className="w-4 h-4 text-emerald-700" />
-                          <span>Community Member Lounge</span>
+                          <MessageSquare className="w-4 h-4" />
+                          <span>Support Chat</span>
                         </span>
-                        <span className="bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                          <span>Live Chat</span>
-                        </span>
+                        {unreadCount > 0 && (
+                          <span className="text-[10px] font-bold tabular-nums">{unreadCount}</span>
+                        )}
                       </button>
                     )}
 
                     <button
+                      type="button"
                       onClick={() => {
                         setUserDropdownOpen(false);
-                        onOpenAdmin();
+                        handleNavSelect('wishlist');
                       }}
-                      className="w-full text-left px-3 py-2 rounded-xl bg-amber-50/70 hover:bg-amber-100/80 text-amber-950 font-bold flex items-center justify-between cursor-pointer transition-colors"
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-800 font-semibold flex items-center justify-between cursor-pointer transition-colors"
                     >
                       <span className="flex items-center gap-2">
-                        <ShieldCheck className="w-4 h-4 text-amber-700" />
-                        <span>System Admin Panel</span>
+                        <Heart className="w-4 h-4 text-stone-500" />
+                        <span>Wishlist</span>
                       </span>
-                      <span className="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded-full text-[10px] font-extrabold">
-                        {activitiesCount}
-                      </span>
+                      <span className="text-[11px] text-stone-500 tabular-nums">{wishlistCount}</span>
                     </button>
 
-                    <button
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        onOpenThemeSelector();
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-700 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
-                    >
-                      <Palette className="w-4 h-4 text-emerald-700" />
-                      <span>Color Theme Palette</span>
-                    </button>
-
-                    {onToggleMinimizeHero && (
+                    {currentUser.role === 'admin' && (
                       <button
+                        type="button"
                         onClick={() => {
                           setUserDropdownOpen(false);
-                          onToggleMinimizeHero();
+                          handleNavSelect('role-admin');
                         }}
-                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-700 font-semibold flex items-center justify-between cursor-pointer transition-colors"
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-800 font-semibold flex items-center justify-between cursor-pointer transition-colors"
                       >
                         <span className="flex items-center gap-2">
-                          {isHeroMinimized ? <Maximize2 className="w-4 h-4 text-emerald-600" /> : <Minimize2 className="w-4 h-4 text-stone-500" />}
-                          <span>{isHeroMinimized ? 'Expand Full Banner' : 'Minimize Store Banner (100%)'}</span>
+                          <ShieldCheck className="w-4 h-4 text-amber-700" />
+                          <span>Admin Panel</span>
                         </span>
-                        <span className="text-[10px] text-stone-400">
-                          {isHeroMinimized ? 'Slim' : 'Full'}
-                        </span>
+                        <span className="text-[11px] text-stone-500 tabular-nums">{activitiesCount}</span>
+                      </button>
+                    )}
+
+                    {onOpenAccessHub && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserDropdownOpen(false);
+                          handleNavSelect('access-anywhere');
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-800 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+                      >
+                        <Compass className="w-4 h-4 text-emerald-700" />
+                        <span>Access Anywhere</span>
                       </button>
                     )}
 
                     {onOpenOrderTracker && (
                       <button
+                        type="button"
                         onClick={() => {
                           setUserDropdownOpen(false);
-                          onOpenOrderTracker();
+                          handleNavSelect('order-tracker');
                         }}
-                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-700 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-800 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
                       >
-                        <Navigation className="w-4 h-4 text-theme-primary" />
-                        <span>Live Kigali Order Tracker</span>
+                        <Navigation className="w-4 h-4 text-emerald-700" />
+                        <span>Track Order</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        handleNavSelect('theme-selector');
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-800 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+                    >
+                      <Palette className="w-4 h-4 text-stone-500" />
+                      <span>Color Theme</span>
+                    </button>
+
+                    {onToggleMinimizeHero && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserDropdownOpen(false);
+                          handleNavSelect('toggle-banner');
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-800 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+                      >
+                        {isHeroMinimized ? (
+                          <Maximize2 className="w-4 h-4 text-stone-500" />
+                        ) : (
+                          <Minimize2 className="w-4 h-4 text-stone-500" />
+                        )}
+                        <span>{isHeroMinimized ? 'Expand Hero Banner' : 'Compact Store View'}</span>
                       </button>
                     )}
 
                     <a
                       href="/api/system/download-zip"
                       download="fofogreen-system.zip"
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 text-purple-900 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
                       onClick={() => setUserDropdownOpen(false)}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-800 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
                     >
-                      <Download className="w-4 h-4 text-purple-700" />
+                      <Download className="w-4 h-4 text-stone-500" />
                       <span>Download System (ZIP)</span>
                     </a>
                   </div>
 
-                  {/* Sign Out */}
-                  <div className="pt-1 mt-1 border-t border-stone-100 px-1">
+                  <div className="pt-1 mt-1 border-t border-stone-100 px-1.5">
                     <button
+                      type="button"
                       onClick={() => {
                         setUserDropdownOpen(false);
                         onLogout();
                       }}
-                      className="w-full text-left px-3 py-1.5 rounded-xl hover:bg-rose-50 text-rose-600 font-bold flex items-center gap-2 cursor-pointer transition-colors"
+                      className="w-full text-left px-3 py-1.5 rounded-xl hover:bg-rose-50 text-rose-700 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span>Sign Out</span>
                     </button>
                   </div>
-
                 </div>
               )}
             </div>
 
             {/* Mobile Hamburger Button */}
             <button
+              type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="lg:hidden p-2 text-stone-700 hover:bg-stone-100 rounded-xl transition-colors cursor-pointer"
+              className={`lg:hidden p-2 rounded-xl transition-colors cursor-pointer ${
+                mobileMenuOpen
+                  ? 'bg-emerald-800 text-white'
+                  : 'text-stone-700 hover:bg-stone-100'
+              }`}
               aria-label="Toggle navigation menu"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
-
           </div>
-
         </div>
       </div>
 
-      {/* MOBILE DRAWER (Clean & Full Feature) */}
+      {/* Mobile Navigation Drawer with Active Selection State */}
       {mobileMenuOpen && (
-        <div className="lg:hidden bg-white border-b border-stone-200 px-4 pt-3 pb-6 space-y-2 shadow-xl animate-in slide-in-from-top-2 duration-150">
-          
-          {/* Quick 100% Minimized Toggle on Mobile */}
-          {onToggleMinimizeHero && (
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                onToggleMinimizeHero();
-              }}
-              className="w-full p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/70 text-emerald-900 font-bold text-xs flex items-center justify-between cursor-pointer"
-            >
-              <span className="flex items-center gap-2">
-                {isHeroMinimized ? <Maximize2 className="w-4 h-4 text-emerald-700" /> : <Minimize2 className="w-4 h-4 text-emerald-700" />}
-                <span>{isHeroMinimized ? 'Expand Homepage Banner' : '100% Minimized (Show Store)'}</span>
-              </span>
-              <span className="text-[10px] bg-white border border-emerald-300 text-emerald-800 px-2 py-0.5 rounded-md uppercase font-black">
-                {isHeroMinimized ? 'Active' : 'Toggle'}
-              </span>
-            </button>
-          )}
-
-          <div className="space-y-1 pt-1">
-            <button
-              onClick={() => scrollTo('home')}
-              className="block w-full text-left px-3 py-2 rounded-lg font-bold text-stone-800 hover:bg-stone-100 text-sm"
-            >
-              {t.home || 'Home'}
-            </button>
-            <button
-              onClick={() => scrollTo('shop')}
-              className="block w-full text-left px-3 py-2 rounded-lg font-bold text-stone-800 hover:bg-stone-100 text-sm"
-            >
-              {t.shop}
-            </button>
-            <button
-              onClick={() => scrollTo('baskets')}
-              className="w-full text-left px-3 py-2 rounded-lg font-bold text-stone-800 hover:bg-stone-100 text-sm flex items-center justify-between"
-            >
-              <span>Recipe Baskets & Meal Kits</span>
-              <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black uppercase">
-                New
-              </span>
-            </button>
-            <button
-              onClick={() => scrollTo('delivery')}
-              className="block w-full text-left px-3 py-2 rounded-lg font-bold text-stone-800 hover:bg-stone-100 text-sm"
-            >
-              {t.delivery}
-            </button>
-            <button
-              onClick={() => scrollTo('about')}
-              className="block w-full text-left px-3 py-2 rounded-lg font-bold text-stone-800 hover:bg-stone-100 text-sm"
-            >
-              {t.about}
-            </button>
-            <button
-              onClick={() => scrollTo('contact')}
-              className="block w-full text-left px-3 py-2 rounded-lg font-bold text-stone-800 hover:bg-stone-100 text-sm"
-            >
-              {t.contact}
-            </button>
+        <div className="lg:hidden bg-white border-b border-stone-200 px-4 pt-3 pb-6 space-y-3 shadow-lg">
+          <div className="space-y-1">
+            {(
+              [
+                { id: 'home', label: t.home || 'Home' },
+                { id: 'shop', label: t.shop },
+                { id: 'baskets', label: 'Recipe Baskets & Kits' },
+                { id: 'delivery', label: t.delivery },
+                { id: 'about', label: t.about },
+                { id: 'contact', label: t.contact },
+                { id: 'community-chat', label: 'Support Chat' },
+              ] as Array<{ id: NavbarSelection; label: string }>
+            ).map((item) => {
+              const selected = selectedNavOption === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-current={selected ? 'page' : undefined}
+                  onClick={() => handleNavSelect(item.id)}
+                  className={`w-full text-left px-3.5 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-between cursor-pointer transition-colors ${
+                    selected
+                      ? 'bg-emerald-800 text-white'
+                      : 'text-stone-800 hover:bg-stone-100'
+                  }`}
+                >
+                  <span>{item.label}</span>
+                  {selected && <span className="text-[11px] opacity-85">Active</span>}
+                </button>
+              );
+            })}
           </div>
 
-          {/* Quick Utility Actions in Mobile */}
           <div className="pt-3 border-t border-stone-100 grid grid-cols-2 gap-2">
             {onOpenAccessHub && (
               <button
-                onClick={() => { setMobileMenuOpen(false); onOpenAccessHub(); }}
-                className="col-span-2 p-2.5 rounded-xl border border-emerald-200 bg-emerald-50 font-bold text-xs text-emerald-950 flex items-center justify-center gap-1.5"
+                type="button"
+                onClick={() => handleNavSelect('access-anywhere')}
+                className={`col-span-2 p-2.5 rounded-xl border font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
+                  selectedNavOption === 'access-anywhere'
+                    ? 'bg-emerald-800 border-emerald-800 text-white'
+                    : 'border-stone-200 bg-stone-50 text-stone-800'
+                }`}
               >
-                <Compass className="w-3.5 h-3.5 text-emerald-700" />
-                <span>Access Anywhere (Offline App, QR &amp; Zones)</span>
+                <Compass className="w-3.5 h-3.5" />
+                <span>Access Anywhere</span>
               </button>
             )}
             {onOpenOrderTracker && (
               <button
-                onClick={() => { setMobileMenuOpen(false); onOpenOrderTracker(); }}
-                className="p-2.5 rounded-xl border border-stone-200 bg-stone-50 font-bold text-xs text-stone-800 flex items-center justify-center gap-1.5"
+                type="button"
+                onClick={() => handleNavSelect('order-tracker')}
+                className="p-2.5 rounded-xl border border-stone-200 bg-stone-50 font-semibold text-xs text-stone-800 flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                <Navigation className="w-3.5 h-3.5 text-theme-primary" />
+                <Navigation className="w-3.5 h-3.5 text-emerald-700" />
                 <span>Track Order</span>
               </button>
             )}
-
             <button
-              onClick={() => { setMobileMenuOpen(false); onOpenThemeSelector(); }}
-              className="p-2.5 rounded-xl border border-stone-200 bg-stone-50 font-bold text-xs text-stone-800 flex items-center justify-center gap-1.5"
+              type="button"
+              onClick={() => handleNavSelect('theme-selector')}
+              className="p-2.5 rounded-xl border border-stone-200 bg-stone-50 font-semibold text-xs text-stone-800 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Palette className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Theme Colors</span>
+              <span>Theme</span>
             </button>
           </div>
 
-          {/* Download System ZIP in Mobile */}
-          <a
-            href="/api/system/download-zip"
-            download="fofogreen-system.zip"
-            onClick={() => setMobileMenuOpen(false)}
-            className="w-full p-2.5 rounded-xl border border-purple-200 bg-purple-50 text-purple-900 font-bold text-xs flex items-center justify-between"
-          >
-            <span className="flex items-center gap-2">
-              <Download className="w-4 h-4 text-purple-700" />
-              <span>Download System (ZIP Folder)</span>
-            </span>
-            <span className="text-[10px] bg-purple-200 text-purple-900 px-2 py-0.5 rounded-md uppercase font-black">
-              206 KB
-            </span>
-          </a>
+          <div className="pt-2 flex items-center justify-between gap-2">
+            <select
+              value={currentLang}
+              onChange={(e) => onLanguageChange(e.target.value as Language)}
+              className="bg-stone-100 border border-stone-200 rounded-xl px-3 py-2 text-xs font-semibold text-stone-800 uppercase"
+              aria-label="Select language"
+            >
+              <option value="en">EN</option>
+              <option value="rw">RW</option>
+              <option value="fr">FR</option>
+              <option value="es">ES</option>
+              <option value="ar">AR</option>
+            </select>
 
-          {/* Auth in Mobile Drawer */}
-          <div className="pt-2">
             {currentUser ? (
-              <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
-                <div>
-                  <p className="font-extrabold text-xs text-stone-900">{currentUser.name}</p>
-                  <p className="text-[10px] text-stone-500 uppercase font-black tracking-wider text-amber-700">
-                    {currentUser.role}
-                  </p>
-                </div>
-                <button
-                  onClick={() => { setMobileMenuOpen(false); onLogout(); }}
-                  className="text-xs text-rose-600 font-bold hover:underline"
-                >
-                  Sign Out
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onLogout();
+                }}
+                className="px-3 py-2 rounded-xl text-xs text-rose-700 font-semibold hover:bg-rose-50 cursor-pointer"
+              >
+                Sign Out ({currentUser.name.split(' ')[0]})
+              </button>
             ) : (
               <button
-                onClick={() => { setMobileMenuOpen(false); onOpenAuth(); }}
-                className="w-full py-2.5 text-center font-bold text-white bg-theme-primary rounded-xl text-xs shadow-xs"
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onOpenAuth();
+                }}
+                className="flex-1 py-2 text-center font-semibold text-white bg-theme-primary rounded-xl text-xs cursor-pointer"
               >
                 {t.signIn}
               </button>
             )}
           </div>
-
         </div>
       )}
     </header>

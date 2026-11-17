@@ -40,7 +40,7 @@ import {
 
 // Components
 import { RoleWorkspaceBar } from './components/RoleWorkspaceBar';
-import { Navbar } from './components/Navbar';
+import { Navbar, NavbarSelection } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { CategoryFilter } from './components/CategoryFilter';
 import { ProductCard } from './components/ProductCard';
@@ -70,7 +70,7 @@ import { CommunityChatModal } from './components/CommunityChatModal';
 import { AccessAnywhereModal } from './components/AccessAnywhereModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { PWAInstallButton } from './components/PWAInstallButton';
-import { MobileBottomNav } from './components/MobileBottomNav';
+import { MobileBottomNav, MobileNavTab } from './components/MobileBottomNav';
 import { RealtimeCommunityProvider } from './context/RealtimeCommunityContext';
 import { LivePresenceNotifications } from './components/LivePresenceNotifications';
 import { api, DatabaseHealth } from './services/api';
@@ -264,6 +264,7 @@ export default function App() {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [checkoutDiscount, setCheckoutDiscount] = useState(0);
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<PaymentMethod>('mtn');
+  const [activeMobileTab, setActiveMobileTab] = useState<MobileNavTab>('shop');
 
   // New Features: Order Tracking Radar & Farm Passport
   const [isOrderTrackerOpen, setIsOrderTrackerOpen] = useState(false);
@@ -1439,6 +1440,23 @@ export default function App() {
         onOpenCustomerFruitMarket={openCustomerMarket}
         onOpenCommunityChat={openCommunityChat}
         onOpenAccessHub={() => setIsAccessHubOpen(true)}
+        activeNav={
+          (isCommunityChatOpen
+            ? 'community-chat'
+            : isCartOpen
+            ? 'cart'
+            : isAccessHubOpen
+            ? 'access-anywhere'
+            : isOrderTrackerOpen
+            ? 'order-tracker'
+            : isWishlistOpen
+            ? 'wishlist'
+            : isThemeSelectorOpen
+            ? 'theme-selector'
+            : isAdminOpen
+            ? 'role-admin'
+            : undefined) as NavbarSelection | undefined
+        }
       />
 
       {/* Hero Section with Live Search and Minimize Mode */}
@@ -1957,8 +1975,21 @@ export default function App() {
       {/* Mobile Bottom Thumb-Zone Navigation (< 768px) */}
       <MobileBottomNav
         cartCount={cartTotalItems}
-        onScrollToShop={() => document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' })}
+        activeTab={
+          isCommunityChatOpen
+            ? 'support'
+            : isCartOpen
+            ? 'cart'
+            : isAccessHubOpen
+            ? 'anywhere'
+            : activeMobileTab
+        }
+        onScrollToShop={() => {
+          setActiveMobileTab('shop');
+          document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' });
+        }}
         onFocusSearch={() => {
+          setActiveMobileTab('search');
           const hero = document.getElementById('home');
           hero?.scrollIntoView({ behavior: 'smooth' });
           setTimeout(() => {
@@ -1966,9 +1997,18 @@ export default function App() {
             input?.focus();
           }, 250);
         }}
-        onOpenAccessHub={() => setIsAccessHubOpen(true)}
-        onOpenCart={() => setIsCartOpen(true)}
-        onOpenSupport={openCommunityChat}
+        onOpenAccessHub={() => {
+          setActiveMobileTab('anywhere');
+          setIsAccessHubOpen(true);
+        }}
+        onOpenCart={() => {
+          setActiveMobileTab('cart');
+          setIsCartOpen(true);
+        }}
+        onOpenSupport={() => {
+          setActiveMobileTab('support');
+          openCommunityChat();
+        }}
       />
 
       {/* Floating Member Lounge & Live Chat Capsule (desktop; mobile uses MobileBottomNav Support) */}
