@@ -22,6 +22,8 @@ interface RealtimeCommunityContextType {
     prefillReply?: string;
   } | null;
   clearActiveChatTarget: () => void;
+  deleteMessage: (messageId: string) => Promise<boolean>;
+  updateMessageStatus: (messageId: string, status: 'pending' | 'answered') => Promise<boolean>;
   latestMessages: ChatMessage[];
   sendMessage: (payload: {
     channelId: string;
@@ -112,7 +114,13 @@ export const RealtimeCommunityProvider: React.FC<{
     channelId?: string;
     prefillReply?: string;
   }) => {
-    setActiveChatTarget(target);
+    const cleanChannelId = target.channelId && target.channelId.startsWith('dm:')
+      ? 'general'
+      : target.channelId;
+    setActiveChatTarget({
+      ...target,
+      channelId: cleanChannelId
+    });
     onOpenChatModal();
     setUnreadCount(0);
   };
@@ -237,6 +245,27 @@ export const RealtimeCommunityProvider: React.FC<{
                 }
                 break;
               }
+
+              case 'chat:delete': {
+                const { messageId } = data.payload || {};
+                if (messageId) {
+                  setLatestMessages(prev => prev.filter(m => m.id !== messageId));
+                }
+                break;
+              }
+
+              case 'chat:status': {
+                const { messageId, status, message } = data.payload || {};
+                if (messageId) {
+                  setLatestMessages(prev => prev.map(m => {
+                    if (m.id === messageId) {
+                      return message || { ...m, status };
+                    }
+                    return m;
+                  }));
+                }
+                break;
+              }
             }
           } catch (err) {
             console.warn('[RealtimeCommunity] Message parse error:', err);
@@ -289,10 +318,10 @@ export const RealtimeCommunityProvider: React.FC<{
   useEffect(() => {
     if (!currentUser || currentUser.role === 'admin' || currentUser.role === 'customer') return;
 
-    // Check if there are messages from Admin directed to this staff user or in staff-internal
+    // Check if there are messages from Admin in public staff-internal channel
     const staffMessages = latestMessages.filter(m => 
       (m.senderRole === 'admin' || m.senderId === 'usr-admin') &&
-      (m.recipientId === currentUserId || m.channelId === 'staff-internal')
+      m.channelId === 'staff-internal'
     );
 
     if (staffMessages.length > 0) {
@@ -332,6 +361,48 @@ export const RealtimeCommunityProvider: React.FC<{
     }
   };
 
+  // Delete message helper (Admin only)
+  const deleteMessage = async (messageId: string): Promise<boolean> => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'chat:delete',
+        payload: { messageId }
+      }));
+      return true;
+    }
+    try {
+      const res = await fetch(`/api/chat/messages/${messageId}?role=${currentUserRole}`, {
+        method: 'DELETE'
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn('Delete message failed:', err);
+      return false;
+    }
+  };
+
+  // Update question status helper (Admin only)
+  const updateMessageStatus = async (messageId: string, status: 'pending' | 'answered'): Promise<boolean> => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'chat:status',
+        payload: { messageId, status }
+      }));
+      return true;
+    }
+    try {
+      const res = await fetch(`/api/chat/messages/${messageId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, role: currentUserRole, answeredBy: currentUserName })
+      });
+      return res.ok;
+    } catch (err) {
+      console.warn('Update message status failed:', err);
+      return false;
+    }
+  };
+
   return (
     <RealtimeCommunityContext.Provider
       value={{
@@ -347,7 +418,9 @@ export const RealtimeCommunityProvider: React.FC<{
         activeChatTarget,
         clearActiveChatTarget,
         latestMessages,
-        sendMessage
+        sendMessage,
+        deleteMessage,
+        updateMessageStatus
       }}
     >
       {children}

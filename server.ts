@@ -519,10 +519,7 @@ async function startServer() {
       productTag, 
       attachments,
       voiceNote,
-      callEvent,
-      isDirectMessage, 
-      recipientId, 
-      recipientName 
+      callEvent
     } = req.body;
     if (!content && !attachments && !voiceNote && !callEvent) {
       return res.status(400).json({ error: 'Missing content or attachment' });
@@ -531,25 +528,58 @@ async function startServer() {
       return res.status(400).json({ error: 'Missing sender info' });
     }
 
-    const message = chatService.addMessage({
-      channelId: channelId || 'general',
-      senderId,
-      senderName,
-      senderRole: senderRole || 'customer',
-      senderAvatar,
-      content: content || '',
-      reactions: {},
-      replyTo,
-      productTag,
-      attachments,
-      voiceNote,
-      callEvent,
-      isDirectMessage,
-      recipientId,
-      recipientName
-    });
+    // REQUIREMENT 3: Only Admin can reply to customer questions
+    if (replyTo && senderRole !== 'admin') {
+      return res.status(403).json({ error: 'Only the Administrator can reply to customer questions in the public customer support chat.' });
+    }
 
-    res.status(201).json(message);
+    const publicChannelId = typeof channelId === 'string' && !channelId.startsWith('dm:') && channelId.trim()
+      ? channelId
+      : 'general';
+
+    try {
+      const message = chatService.addMessage({
+        channelId: publicChannelId,
+        senderId,
+        senderName,
+        senderRole: senderRole || 'customer',
+        senderAvatar,
+        content: content || '',
+        reactions: {},
+        replyTo,
+        productTag,
+        attachments,
+        voiceNote,
+        callEvent,
+        isDirectMessage: false
+      });
+
+      res.status(201).json(message);
+    } catch (err: any) {
+      res.status(400).json({ error: err?.message || 'Failed to save message' });
+    }
+  });
+
+  api.delete('/chat/messages/:id', (req: Request, res: Response) => {
+    const role = (req.headers['x-user-role'] || req.query.role || req.body?.role) as string;
+    const result = chatService.deleteMessage(req.params.id, role || 'customer');
+    if (!result.success) {
+      return res.status(role === 'admin' ? 404 : 403).json({ error: result.error });
+    }
+    res.json({ message: 'Message deleted successfully', messageId: req.params.id });
+  });
+
+  api.patch('/chat/messages/:id/status', (req: Request, res: Response) => {
+    const role = (req.headers['x-user-role'] || req.body?.role) as string;
+    const status = req.body?.status as 'pending' | 'answered';
+    if (!status || !['pending', 'answered'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be pending or answered' });
+    }
+    const result = chatService.updateMessageStatus(req.params.id, status, role || 'customer');
+    if (!result.success) {
+      return res.status(role === 'admin' ? 404 : 403).json({ error: result.error });
+    }
+    res.json(result.message);
   });
 
   api.post('/chat/messages/:id/reaction', (req: Request, res: Response) => {

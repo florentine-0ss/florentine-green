@@ -54,6 +54,10 @@ export interface ServerChatMessage {
   isDirectMessage?: boolean;
   recipientId?: string;
   recipientName?: string;
+  isOfficialReply?: boolean;
+  status?: 'pending' | 'answered';
+  answeredBy?: string;
+  answeredAt?: string;
 }
 
 export interface ChatChannel {
@@ -69,12 +73,12 @@ export interface ChatChannel {
 export const CHAT_CHANNELS: ChatChannel[] = [
   {
     id: 'general',
-    name: 'General Community Lounge',
-    nameRw: 'Icyumba Rusange cy\'Abanyamuryango',
-    description: 'Welcome space for all joined members! Rwandan recipes, organic lifestyle tips & friendly greetings.',
-    icon: 'MessageSquare',
+    name: 'Public Customer Support Chat',
+    nameRw: 'Urubuga Rusange rw\'Ubufasha',
+    description: 'Shared public customer support chat. Customers can ask questions, and only the Admin can reply. All customers see all questions and Admin replies in real time.',
+    icon: 'HelpCircle',
     category: 'public',
-    badge: 'Popular'
+    badge: 'Customer Support'
   },
   {
     id: 'fresh-harvest',
@@ -267,56 +271,48 @@ const INITIAL_SEED_MESSAGES: ServerChatMessage[] = [
   },
   {
     id: 'msg-dm-admin-stock-1',
-    channelId: 'dm:usr-admin-usr-stock',
+    channelId: 'staff-internal',
     senderId: 'usr-admin',
     senderName: 'Florentine Mushimiyimana',
     senderRole: 'admin',
-    recipientId: 'usr-stock',
-    recipientName: 'Eric Mugisha',
-    isDirectMessage: true,
-    content: 'Hi Eric, please double check the damaged fruit shelf in section C and record any discarded items before 2:00 PM.',
+    isDirectMessage: false,
+    content: '@Eric Mugisha Please double check the damaged fruit shelf in section C and record any discarded items before 2:00 PM.',
     timestamp: new Date(Date.now() - 3600000 * 0.5).toISOString(),
     timeFormatted: '30 mins ago',
     reactions: { '📦': ['usr-stock'] }
   },
   {
     id: 'msg-dm-admin-cashier-1',
-    channelId: 'dm:usr-admin-usr-cashier',
+    channelId: 'staff-internal',
     senderId: 'usr-admin',
     senderName: 'Florentine Mushimiyimana',
     senderRole: 'admin',
-    recipientId: 'usr-cashier',
-    recipientName: 'Chantal Uwera',
-    isDirectMessage: true,
-    content: 'Hello Chantal, we are enabling automatic RRA EBM v2 receipts for all cashier transactions. Let me know if you encounter any printer or USSD timeout issues.',
+    isDirectMessage: false,
+    content: '@Chantal Uwera We are enabling automatic RRA EBM v2 receipts for all cashier transactions. Let me know if you encounter any printer or USSD timeout issues.',
     timestamp: new Date(Date.now() - 3600000 * 0.45).toISOString(),
     timeFormatted: '27 mins ago',
     reactions: { '💳': ['usr-cashier'] }
   },
   {
     id: 'msg-dm-admin-accountant-1',
-    channelId: 'dm:usr-accountant-usr-admin',
+    channelId: 'staff-internal',
     senderId: 'usr-admin',
     senderName: 'Florentine Mushimiyimana',
     senderRole: 'admin',
-    recipientId: 'usr-accountant',
-    recipientName: 'Aimee Mukamana',
-    isDirectMessage: true,
-    content: 'Aimee, please export this week\'s net profit and gross margin reports so we can review them at the management meeting.',
+    isDirectMessage: false,
+    content: '@Aimee Mukamana Please export this week\'s net profit and gross margin reports so we can review them at the management meeting.',
     timestamp: new Date(Date.now() - 3600000 * 0.35).toISOString(),
     timeFormatted: '20 mins ago',
     reactions: { '📊': ['usr-accountant'] }
   },
   {
     id: 'msg-dm-admin-sales-1',
-    channelId: 'dm:usr-admin-usr-sales',
+    channelId: 'staff-internal',
     senderId: 'usr-admin',
     senderName: 'Florentine Mushimiyimana',
     senderRole: 'admin',
-    recipientId: 'usr-sales',
-    recipientName: 'Kevin Niyonzima',
-    isDirectMessage: true,
-    content: 'Kevin, remember to assist customers with the digital basket builder on the kiosk if they want help choosing between avocados and pineapples.',
+    isDirectMessage: false,
+    content: '@Kevin Niyonzima Remember to assist customers with the digital basket builder on the kiosk if they want help choosing between avocados and pineapples.',
     timestamp: new Date(Date.now() - 3600000 * 0.3).toISOString(),
     timeFormatted: '18 mins ago',
     reactions: { '🤝': ['usr-sales'] }
@@ -332,17 +328,59 @@ class ChatService {
     this.loadMessages();
   }
 
+  private normalizePublicChannel(channelId?: string, recipientId?: string): string {
+    if (!channelId || typeof channelId !== 'string') return 'general';
+    if (channelId.startsWith('dm:')) {
+      const isStaffTarget =
+        (recipientId && ['usr-stock', 'usr-cashier', 'usr-accountant', 'usr-sales'].includes(recipientId)) ||
+        channelId.includes('usr-stock') ||
+        channelId.includes('usr-cashier') ||
+        channelId.includes('usr-accountant') ||
+        channelId.includes('usr-sales');
+      return isStaffTarget ? 'staff-internal' : 'general';
+    }
+    return channelId;
+  }
+
+  private normalizeMessageToPublic(m: any): { msg: ServerChatMessage; changed: boolean } {
+    const normalizedChannel = this.normalizePublicChannel(m.channelId, m.recipientId);
+    const hadPrivateFlags = Boolean(
+      m.isDirectMessage ||
+      m.recipientId ||
+      m.recipientName ||
+      (typeof m.channelId === 'string' && m.channelId.startsWith('dm:'))
+    );
+    if (!hadPrivateFlags && normalizedChannel === m.channelId) {
+      return { msg: m, changed: false };
+    }
+    const { recipientId, recipientName, ...rest } = m;
+    return {
+      msg: {
+        ...rest,
+        channelId: normalizedChannel,
+        isDirectMessage: false
+      },
+      changed: true
+    };
+  }
+
   private loadMessages() {
     try {
       if (fs.existsSync(CHAT_FILE)) {
         const raw = fs.readFileSync(CHAT_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Merge missing initial seed messages (e.g. newly introduced staff channels & DMs)
-          const existingIds = new Set(parsed.map((m: any) => m.id));
+          let modified = false;
+          const normalizedExisting = parsed.map((m: any) => {
+            const { msg, changed } = this.normalizeMessageToPublic(m);
+            if (changed) modified = true;
+            return msg;
+          });
+          // Merge missing initial seed messages
+          const existingIds = new Set(normalizedExisting.map((m: any) => m.id));
           const missingSeeds = INITIAL_SEED_MESSAGES.filter(s => !existingIds.has(s.id));
-          this.messages = [...parsed, ...missingSeeds];
-          if (missingSeeds.length > 0) {
+          this.messages = [...normalizedExisting, ...missingSeeds];
+          if (missingSeeds.length > 0 || modified) {
             this.saveMessages();
           }
           return;
@@ -368,7 +406,8 @@ class ChatService {
 
   public getMessages(channelId?: string): ServerChatMessage[] {
     if (channelId) {
-      return this.messages.filter(m => m.channelId === channelId);
+      const publicChannel = this.normalizePublicChannel(channelId);
+      return this.messages.filter(m => m.channelId === publicChannel);
     }
     return this.messages;
   }
@@ -382,15 +421,44 @@ class ChatService {
   }
 
   public addMessage(msg: Omit<ServerChatMessage, 'id' | 'timestamp' | 'timeFormatted' | 'reactions'> & { reactions?: Record<string, string[]> }): ServerChatMessage {
+    // REQUIREMENT 3: Only the Admin can reply to customer questions
+    if (msg.replyTo && msg.senderRole !== 'admin') {
+      throw new Error('Only the Administrator can reply to customer questions in the public customer support chat.');
+    }
+
     const id = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
     const now = new Date();
+    const isOfficialReply = msg.senderRole === 'admin' && Boolean(msg.replyTo);
+    const { recipientId: _rId, recipientName: _rName, isDirectMessage: _dm, ...cleanMsg } = msg;
+    const publicChannelId = this.normalizePublicChannel(msg.channelId, msg.recipientId);
+
     const newMsg: ServerChatMessage = {
-      ...msg,
+      ...cleanMsg,
+      channelId: publicChannelId,
+      isDirectMessage: false,
       id,
       timestamp: now.toISOString(),
       timeFormatted: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      reactions: msg.reactions || {}
+      reactions: msg.reactions || {},
+      isOfficialReply,
+      status: isOfficialReply ? 'answered' : (msg.status || (msg.senderRole === 'customer' ? 'pending' : undefined)),
+      answeredBy: isOfficialReply ? msg.senderName : undefined,
+      answeredAt: isOfficialReply ? now.toISOString() : undefined
     };
+
+    // If Admin is replying to an existing customer question, mark the parent question as answered
+    if (isOfficialReply && msg.replyTo?.id) {
+      const parentMsg = this.messages.find(m => m.id === msg.replyTo!.id);
+      if (parentMsg) {
+        parentMsg.status = 'answered';
+        parentMsg.answeredBy = msg.senderName;
+        parentMsg.answeredAt = now.toISOString();
+        this.broadcast({
+          type: 'chat:status',
+          payload: { messageId: parentMsg.id, status: 'answered', message: parentMsg }
+        });
+      }
+    }
 
     this.messages.push(newMsg);
     // Keep max 500 messages
@@ -406,6 +474,55 @@ class ChatService {
     });
 
     return newMsg;
+  }
+
+  public deleteMessage(messageId: string, role: string): { success: boolean; error?: string } {
+    // REQUIREMENT 5: Only Admin can manage/delete support chat messages
+    if (role !== 'admin') {
+      return { success: false, error: 'Only the Administrator can delete messages from public customer support.' };
+    }
+
+    const idx = this.messages.findIndex(m => m.id === messageId);
+    if (idx === -1) {
+      return { success: false, error: 'Message not found' };
+    }
+
+    this.messages.splice(idx, 1);
+    this.saveMessages();
+
+    // Real-time broadcast deletion to all connected customers & staff
+    this.broadcast({
+      type: 'chat:delete',
+      payload: { messageId }
+    });
+
+    return { success: true };
+  }
+
+  public updateMessageStatus(messageId: string, status: 'pending' | 'answered', role: string): { success: boolean; message?: ServerChatMessage; error?: string } {
+    // REQUIREMENT 5: Only Admin can update question resolution status
+    if (role !== 'admin') {
+      return { success: false, error: 'Only the Administrator can update customer question status.' };
+    }
+
+    const msg = this.messages.find(m => m.id === messageId);
+    if (!msg) {
+      return { success: false, error: 'Message not found' };
+    }
+
+    msg.status = status;
+    if (status === 'answered') {
+      msg.answeredAt = new Date().toISOString();
+    }
+    this.saveMessages();
+
+    // Broadcast updated question status in real time
+    this.broadcast({
+      type: 'chat:status',
+      payload: { messageId, status, message: msg }
+    });
+
+    return { success: true, message: msg };
   }
 
   public toggleReaction(messageId: string, emoji: string, userId: string): ServerChatMessage | null {
@@ -502,13 +619,61 @@ class ChatService {
               const meta = this.connectedSockets.get(ws);
               if (!meta?.userId || !payload?.content) break;
 
-              // Trust the authenticated socket identity, never a client-supplied sender.
-              this.addMessage({
-                ...payload,
-                senderId: meta.userId,
-                senderName: meta.userName || 'Joined Member',
-                senderRole: meta.role || 'customer'
-              });
+              // REQUIREMENT 3: Only the Admin can reply to customer questions
+              if (payload.replyTo && meta.role !== 'admin') {
+                ws.send(JSON.stringify({
+                  type: 'chat:error',
+                  payload: {
+                    message: 'Only the Administrator can reply to customer questions in the public customer support chat.'
+                  }
+                }));
+                break;
+              }
+
+              try {
+                // Trust the authenticated socket identity, never a client-supplied sender.
+                this.addMessage({
+                  ...payload,
+                  senderId: meta.userId,
+                  senderName: meta.userName || 'Joined Member',
+                  senderRole: meta.role || 'customer'
+                });
+              } catch (err: any) {
+                ws.send(JSON.stringify({
+                  type: 'chat:error',
+                  payload: { message: err?.message || 'Failed to send message' }
+                }));
+              }
+              break;
+            }
+
+            case 'chat:delete': {
+              const { messageId } = parsed.payload || {};
+              const meta = this.connectedSockets.get(ws);
+              if (messageId && meta?.role) {
+                const res = this.deleteMessage(messageId, meta.role);
+                if (!res.success && res.error) {
+                  ws.send(JSON.stringify({
+                    type: 'chat:error',
+                    payload: { message: res.error }
+                  }));
+                }
+              }
+              break;
+            }
+
+            case 'chat:status': {
+              const { messageId, status } = parsed.payload || {};
+              const meta = this.connectedSockets.get(ws);
+              if (messageId && status && meta?.role) {
+                const res = this.updateMessageStatus(messageId, status, meta.role);
+                if (!res.success && res.error) {
+                  ws.send(JSON.stringify({
+                    type: 'chat:error',
+                    payload: { message: res.error }
+                  }));
+                }
+              }
               break;
             }
 

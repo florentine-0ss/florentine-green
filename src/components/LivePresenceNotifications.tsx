@@ -50,15 +50,22 @@ export const LivePresenceNotifications: React.FC = () => {
 
   const handleRespondToMessage = (toast: PresenceToast) => {
     if (toast.message) {
+      const ch = toast.message.channelId;
+      const publicChannel = ch && !ch.startsWith('dm:') ? ch : 'general';
       openChatForResponse({
-        channelId: toast.message.channelId || 'general',
+        channelId: publicChannel,
         prefillReply: `@${toast.message.senderName} `
       });
     }
+    dismissToast(toast.id);
+  };
+
   const handleRespondToDirective = (toast: PresenceToast) => {
     if (toast.message) {
+      const ch = toast.message.channelId;
+      const publicChannel = ch && !ch.startsWith('dm:') ? ch : 'staff-internal';
       openChatForResponse({
-        channelId: toast.message.channelId || 'staff-internal',
+        channelId: publicChannel,
         prefillReply: `@${toast.message.senderName} Received directive: `
       });
     } else {

@@ -32,6 +32,7 @@ interface NavbarProps {
   onOpenAccountant?: () => void;
   onOpenCustomerFruitMarket?: () => void;
   onOpenCommunityChat?: () => void;
+  onOpenAccessHub?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -56,7 +57,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSalesAttendant,
   onOpenAccountant,
   onOpenCustomerFruitMarket,
-  onOpenCommunityChat
+  onOpenCommunityChat,
+  onOpenAccessHub
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -110,7 +112,9 @@ export const Navbar: React.FC<NavbarProps> = ({
       scrollTo(value);
     } 
     // 2. Quick Features & Tools
-    else if (value === 'community-chat') {
+    else if (value === 'access-anywhere') {
+      onOpenAccessHub?.();
+    } else if (value === 'community-chat') {
       onOpenCommunityChat?.();
     } else if (value === 'order-tracker') {
       onOpenOrderTracker?.();
@@ -204,6 +208,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </optgroup>
 
                   <optgroup label="── Quick Features & Actions ──">
+                    <option value="access-anywhere">🌍 Access Anywhere (Offline, QR, Zones)</option>
                     <option value="community-chat">💬 Member Chat & Community Lounge (Live)</option>
                     <option value="order-tracker">📍 Live Order GPS Radar</option>
                     <option value="toggle-banner">🖼️ {isHeroMinimized ? 'Expand Full Banner' : 'Compact Store View'}</option>
@@ -637,6 +642,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Quick Utility Actions in Mobile */}
           <div className="pt-3 border-t border-stone-100 grid grid-cols-2 gap-2">
+            {onOpenAccessHub && (
+              <button
+                onClick={() => { setMobileMenuOpen(false); onOpenAccessHub(); }}
+                className="col-span-2 p-2.5 rounded-xl border border-emerald-200 bg-emerald-50 font-bold text-xs text-emerald-950 flex items-center justify-center gap-1.5"
+              >
+                <Compass className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Access Anywhere (Offline App, QR &amp; Zones)</span>
+              </button>
+            )}
             {onOpenOrderTracker && (
               <button
                 onClick={() => { setMobileMenuOpen(false); onOpenOrderTracker(); }}

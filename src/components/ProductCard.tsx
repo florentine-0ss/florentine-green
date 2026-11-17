@@ -1,5 +1,5 @@
-import React from 'react';
-import { Star, Heart, Plus, Minus, Eye, Check, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { Star, Heart, Plus, Minus, Eye, Share2, ShieldCheck, Leaf } from 'lucide-react';
 import { Product } from '../types';
 
 interface ProductCardProps {
@@ -11,6 +11,13 @@ interface ProductCardProps {
   onUpdateCartQuantity: (productId: number, quantity: number) => void;
   onQuickView: (product: Product) => void;
   onOpenFarmPassport?: (product: Product) => void;
+  onShareProduct?: (product: Product) => void;
+  purchaseAccess?: {
+    permitted: boolean;
+    requiresSignIn: boolean;
+    reason: string;
+  };
+  onRequireAuth?: (product: Product) => void;
 }
 
 export const ProductCard: React.FC<ProductCardProps> = ({
@@ -22,18 +29,33 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   onUpdateCartQuantity,
   onQuickView,
   onOpenFarmPassport,
+  onShareProduct,
+  purchaseAccess,
+  onRequireAuth,
 }) => {
+  const [imgError, setImgError] = useState(false);
+  const canBuy = purchaseAccess ? purchaseAccess.permitted : product.inStock;
+  const needsAuth = Boolean(purchaseAccess?.requiresSignIn);
   return (
     <div className="group relative bg-white rounded-2xl border border-stone-200/80 overflow-hidden shadow-2xs hover:shadow-lg transition-all duration-300 flex flex-col">
       
       {/* Top Image Container */}
       <div className="relative aspect-square w-full overflow-hidden bg-stone-100">
-        <img
-          src={product.image}
-          alt={product.name}
-          loading="lazy"
-          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
-        />
+        {imgError ? (
+          <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-emerald-50 to-stone-100 text-emerald-800 p-4 text-center">
+            <Leaf className="w-8 h-8 mb-2 text-emerald-700" />
+            <span className="text-xs font-bold text-stone-800 line-clamp-2">{product.name}</span>
+          </div>
+        ) : (
+          <img
+            src={product.image}
+            alt={product.name}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
+            className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
+          />
+        )}
 
         {/* Floating Badge */}
         {product.badge && (
@@ -59,10 +81,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               e.stopPropagation();
               onToggleWishlist(product);
             }}
-            className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md transition-colors shadow-xs ${
+            className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md transition-colors shadow-xs cursor-pointer ${
               isInWishlist
                 ? 'bg-rose-50 text-rose-600'
-                : 'bg-white/80 hover:bg-white text-stone-600 hover:text-rose-600'
+                : 'bg-white/85 hover:bg-white text-stone-600 hover:text-rose-600'
             }`}
             aria-label={isInWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
           >
@@ -71,12 +93,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
           <button
             onClick={() => onQuickView(product)}
-            className="w-8 h-8 rounded-full bg-white/80 hover:bg-white text-stone-600 hover:text-emerald-700 flex items-center justify-center backdrop-blur-md transition-colors shadow-xs"
+            className="w-8 h-8 rounded-full bg-white/85 hover:bg-white text-stone-600 hover:text-emerald-700 flex items-center justify-center backdrop-blur-md transition-colors shadow-xs cursor-pointer"
             aria-label="Quick View"
             title="Quick view"
           >
             <Eye className="w-4 h-4" />
           </button>
+
+          {onShareProduct && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShareProduct(product);
+              }}
+              className="w-8 h-8 rounded-full bg-white/85 hover:bg-white text-stone-600 hover:text-emerald-700 flex items-center justify-center backdrop-blur-md transition-colors shadow-xs cursor-pointer"
+              aria-label={`Share direct link to ${product.name}`}
+              title="Copy direct product link"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Harvested freshness note */}
@@ -135,41 +171,57 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         {/* Footer: Price & Add to Cart button */}
         <div className="mt-4 pt-3 border-t border-stone-100 flex items-center justify-between gap-2">
           <div>
-            <div className="text-base font-extrabold text-stone-900 tracking-tight">
+            <div className="text-base font-extrabold text-stone-900 tracking-tight tabular-nums">
               {product.price.toLocaleString()} <span className="text-xs font-semibold text-stone-500">FRW</span>
             </div>
             {product.oldPrice && (
-              <div className="text-xs text-stone-400 line-through">
+              <div className="text-xs text-stone-400 line-through tabular-nums">
                 {product.oldPrice.toLocaleString()} FRW
               </div>
             )}
           </div>
 
           {/* Add / Quantity Controller */}
-          {cartQuantity > 0 ? (
+          {cartQuantity > 0 && canBuy ? (
             <div className="flex items-center bg-stone-100 border border-stone-200 rounded-lg p-0.5">
               <button
                 onClick={() => onUpdateCartQuantity(product.id, cartQuantity - 1)}
-                className="w-7 h-7 flex items-center justify-center rounded-md bg-white text-stone-800 hover:bg-stone-200 transition-colors shadow-2xs"
+                className="w-7 h-7 flex items-center justify-center rounded-md bg-white text-stone-800 hover:bg-stone-200 transition-colors shadow-2xs cursor-pointer"
                 aria-label="Decrease quantity"
               >
                 <Minus className="w-3.5 h-3.5" />
               </button>
-              <span className="w-7 text-center font-bold text-xs text-stone-900">
+              <span className="w-7 text-center font-bold text-xs text-stone-900 tabular-nums">
                 {cartQuantity}
               </span>
               <button
                 onClick={() => onUpdateCartQuantity(product.id, cartQuantity + 1)}
-                className="w-7 h-7 flex items-center justify-center rounded-md bg-theme-primary text-white hover:opacity-90 transition-colors shadow-2xs"
+                className="w-7 h-7 flex items-center justify-center rounded-md bg-theme-primary text-white hover:opacity-90 transition-colors shadow-2xs cursor-pointer"
                 aria-label="Increase quantity"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
             </div>
+          ) : needsAuth ? (
+            <button
+              type="button"
+              onClick={() => (onRequireAuth ? onRequireAuth(product) : onAddToCart(product, 1))}
+              className="flex items-center gap-1.5 border border-emerald-700 text-emerald-800 hover:bg-emerald-50 px-3 py-2 rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              title={purchaseAccess?.reason}
+            >
+              <span>Sign in to Buy</span>
+            </button>
+          ) : !canBuy ? (
+            <span
+              className="px-2.5 py-1.5 rounded-xl bg-stone-100 text-stone-500 text-[11px] font-semibold whitespace-nowrap shrink-0"
+              title={purchaseAccess?.reason}
+            >
+              {purchaseAccess?.reason || 'Unavailable'}
+            </span>
           ) : (
             <button
               onClick={() => onAddToCart(product, 1)}
-              className="flex items-center gap-1.5 bg-theme-primary hover:opacity-90 active:scale-95 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
+              className="flex items-center gap-1.5 bg-theme-primary hover:opacity-90 active:scale-95 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-xs transition-all whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add</span>

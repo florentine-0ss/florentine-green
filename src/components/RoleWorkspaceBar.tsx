@@ -19,6 +19,7 @@ interface RoleWorkspaceBarProps {
   currentUser: User | null;
   onSwitchRole: (role: UserRole) => void;
   onOpenActiveWorkspace: () => void;
+  onOpenAuth?: () => void;
   stockAlertsCount?: number;
 }
 
@@ -119,13 +120,16 @@ export const RoleWorkspaceBar: React.FC<RoleWorkspaceBarProps> = ({
   currentUser,
   onSwitchRole,
   onOpenActiveWorkspace,
+  onOpenAuth,
   stockAlertsCount = 0
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const activeRoleDef = ROLE_DEFINITIONS.find(r => r.role === currentUser?.role) || ROLE_DEFINITIONS[0];
-  const IconComponent = activeRoleDef.icon;
+  const activeRoleDef = currentUser
+    ? ROLE_DEFINITIONS.find(r => r.role === currentUser.role) || ROLE_DEFINITIONS[5]
+    : null;
+  const IconComponent = activeRoleDef ? activeRoleDef.icon : KeyRound;
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -152,12 +156,16 @@ export const RoleWorkspaceBar: React.FC<RoleWorkspaceBarProps> = ({
               onClick={() => setDropdownOpen(!dropdownOpen)}
               className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-100 transition-all cursor-pointer shadow-2xs"
             >
-              <div className={`w-5 h-5 rounded-md ${activeRoleDef.bgColor} text-white flex items-center justify-center shrink-0`}>
+              <div className={`w-5 h-5 rounded-md ${activeRoleDef ? activeRoleDef.bgColor : 'bg-stone-700'} text-white flex items-center justify-center shrink-0`}>
                 <IconComponent className="w-3.5 h-3.5" />
               </div>
               <div className="flex items-center gap-1.5 text-left">
-                <span className="font-extrabold text-white text-xs">{activeRoleDef.label}</span>
-                <span className="text-[10px] text-stone-400 hidden sm:inline">• {activeRoleDef.title}</span>
+                <span className="font-extrabold text-white text-xs">
+                  {activeRoleDef ? activeRoleDef.label : 'Guest Visitor'}
+                </span>
+                <span className="text-[10px] text-stone-400 hidden sm:inline">
+                  • {activeRoleDef ? activeRoleDef.title : 'Sign in for Customer Access'}
+                </span>
               </div>
               <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
             </button>
@@ -217,11 +225,17 @@ export const RoleWorkspaceBar: React.FC<RoleWorkspaceBarProps> = ({
           </div>
 
           <span className="text-[11px] text-stone-400 hidden xl:inline">
-            Logged in: <strong className="text-stone-200">{currentUser?.name || activeRoleDef.defaultUserName}</strong>
+            {currentUser ? (
+              <>
+                Logged in: <strong className="text-stone-200">{currentUser.name}</strong>
+              </>
+            ) : (
+              'Not signed in yet'
+            )}
           </span>
         </div>
 
-        {/* Right: Fast Launch Dedicated Workspace Action Button */}
+        {/* Right: Fast Launch Dedicated Workspace or Sign In Button */}
         <div className="flex items-center gap-2">
           {currentUser?.role === 'stock_manager' && stockAlertsCount > 0 && (
             <span className="bg-rose-600/90 text-white text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse">
@@ -229,16 +243,26 @@ export const RoleWorkspaceBar: React.FC<RoleWorkspaceBarProps> = ({
             </span>
           )}
 
-          <button
-            onClick={onOpenActiveWorkspace}
-            className={`px-3 py-1 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer ${
-              activeRoleDef.bgColor
-            } text-white hover:opacity-95`}
-          >
-            <IconComponent className="w-3.5 h-3.5" />
-            <span>Open {activeRoleDef.label} Workspace</span>
-            <ExternalLink className="w-3 h-3 opacity-80" />
-          </button>
+          {currentUser && activeRoleDef ? (
+            <button
+              onClick={onOpenActiveWorkspace}
+              className={`px-3 py-1 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer ${
+                activeRoleDef.bgColor
+              } text-white hover:opacity-95`}
+            >
+              <IconComponent className="w-3.5 h-3.5" />
+              <span>Open {activeRoleDef.label} Workspace</span>
+              <ExternalLink className="w-3 h-3 opacity-80" />
+            </button>
+          ) : (
+            <button
+              onClick={() => onOpenAuth?.()}
+              className="px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white transition-all cursor-pointer whitespace-nowrap"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>Sign In as Customer</span>
+            </button>
+          )}
         </div>
 
       </div>

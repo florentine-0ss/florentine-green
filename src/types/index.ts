@@ -13,6 +13,9 @@ export interface Product {
   farmer: string;
   description: string;
   inStock: boolean;
+  customerPurchasable?: boolean;
+  purchasableBy?: UserRole[];
+  maxOrderQuantity?: number;
   calories?: string;
   harvested?: string;
 }
@@ -46,6 +49,7 @@ export interface StaffPermissions {
   canViewReports: boolean;
   canManageFinances: boolean;
   canAssistSales: boolean;
+  canPurchaseRetail?: boolean;
 }
 
 export interface User {
@@ -328,6 +332,10 @@ export interface ChatMessage {
   isDirectMessage?: boolean;
   recipientId?: string;
   recipientName?: string;
+  isOfficialReply?: boolean;
+  status?: 'pending' | 'answered';
+  answeredBy?: string;
+  answeredAt?: string;
 }
 
 export interface ChatChannel {
@@ -396,3 +404,10 @@ export interface PresenceToast {
   timestamp: number;
 }
 
+export interface DeliveryZoneSelection {
+  district: string;
+  sector: string;
+  fee: number;
+  estimatedHours: string;
+  fulfillmentMode: 'delivery' | 'pickup' | 'diaspora';
+}

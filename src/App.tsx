@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   INITIAL_PRODUCTS, 
   INITIAL_REVIEWS, 
@@ -11,7 +11,8 @@ import {
   INITIAL_STOCK_ALERTS,
   INITIAL_FINANCIAL_RECORDS,
   INITIAL_RECEIPTS,
-  DEFAULT_ROLE_PERMISSIONS
+  DEFAULT_ROLE_PERMISSIONS,
+  RWANDA_LOCATIONS
 } from './data/mockData';
 import { TRANSLATIONS } from './data/translations';
 import { 
@@ -32,7 +33,8 @@ import {
   StockAlert,
   FinancialRecord,
   SalesReceipt,
-  ReceiptFeedback
+  ReceiptFeedback,
+  DeliveryZoneSelection
 } from './types';
 
 // Components
@@ -64,10 +66,20 @@ import { OrderTrackerModal } from './components/OrderTrackerModal';
 import { FarmPassportModal } from './components/FarmPassportModal';
 import { MealKitsSection } from './components/MealKitsSection';
 import { CommunityChatModal } from './components/CommunityChatModal';
+import { AccessAnywhereModal } from './components/AccessAnywhereModal';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { RealtimeCommunityProvider } from './context/RealtimeCommunityContext';
+import { LivePresenceNotifications } from './components/LivePresenceNotifications';
 import { api, DatabaseHealth } from './services/api';
+import { offlineCache } from './services/offlineCache';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth, syncFirebaseUserProfile } from './lib/firebase';
+import { getProductAccessForUser, isProductPermittedForCustomerCapacity } from './utils/purchasePermissions';
 
 // Icons
-import { SlidersHorizontal, CheckCircle2, Activity, ShieldCheck, Palette, Navigation, Database, MessageSquare } from 'lucide-react';
+import { SlidersHorizontal, CheckCircle2, Activity, ShieldCheck, Palette, Navigation, Database, MessageSquare, Globe, MapPin, Lock, ShoppingBag } from 'lucide-react';
 
 export default function App() {
   const [currentLang, setCurrentLang] = useState<Language>('en');
@@ -95,6 +107,13 @@ export default function App() {
   const [isCommunityChatOpen, setIsCommunityChatOpen] = useState(false);
   const [activeReceiptModal, setActiveReceiptModal] = useState<SalesReceipt | null>(null);
   const [openChatAfterLogin, setOpenChatAfterLogin] = useState(false);
+  const [openMarketAfterLogin, setOpenMarketAfterLogin] = useState(false);
+
+  // Customer Purchase Access & Pending Action Refs
+  const [permittedOnly, setPermittedOnly] = useState<boolean>(false);
+  const pendingCartActionRef = useRef<{ product: Product; quantity: number } | null>(null);
+  const pendingCheckoutRef = useRef<{ discount: number; payment: PaymentMethod } | null>(null);
+  const manualSessionRef = useRef<boolean>(false);
 
   const openCommunityChat = () => {
     if (!currentUser) {
@@ -106,7 +125,36 @@ export default function App() {
     setIsCommunityChatOpen(true);
   };
 
-  // Connect to persistent Node.js Express backend and database
+  const openCustomerMarket = () => {
+    if (!currentUser) {
+      setOpenMarketAfterLogin(true);
+      setIsAuthOpen(true);
+      showToast('Sign in as a customer to enter the Customer Market');
+      return;
+    }
+    setIsCustomerMarketOpen(true);
+  };
+
+  // Sync Firebase Auth session when returning to app (without overriding manual role/demo switches)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (!fbUser || manualSessionRef.current) return;
+      try {
+        const profile = await syncFirebaseUserProfile(fbUser, 'customer');
+        if (manualSessionRef.current) return;
+        setCurrentUser(profile);
+        setUsers((prev) => [profile, ...prev.filter((u) => u.id !== profile.id)]);
+        if (profile.role === 'customer') {
+          setPermittedOnly(true);
+        }
+      } catch (err) {
+        console.warn('[Auth] Failed to hydrate Firebase session:', err);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Connect to persistent Node.js Express backend and database (with offline cache fallback)
   useEffect(() => {
     async function loadBackendData() {
       try {
@@ -120,20 +168,50 @@ export default function App() {
           api.getActivities()
         ]);
 
-        if (dbProds && dbProds.length > 0) setProducts(dbProds);
+        if (dbProds && dbProds.length > 0) {
+          setProducts(dbProds);
+          offlineCache.saveProducts(dbProds);
+        }
         if (dbOrds && dbOrds.length > 0) setOrders(dbOrds);
         if (dbRevs && dbRevs.length > 0) setReviews(dbRevs);
         if (dbActs && dbActs.length > 0) setActivities(dbActs);
       } catch (err) {
-        console.warn('[Fofo] Backend initial sync:', err);
+        console.warn('[Fofo] Backend initial sync — checking offline cache:', err);
+        const cachedProds = offlineCache.loadProducts();
+        if (cachedProds && cachedProds.length > 0) {
+          setProducts(cachedProds);
+        }
       }
     }
     loadBackendData();
   }, []);
 
-  // Cart & Wishlist State
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [wishlist, setWishlist] = useState<Product[]>([]);
+  // Cart, Wishlist & Active Delivery Location State (persisted for anytime access)
+  const [cart, setCart] = useState<CartItem[]>(() => offlineCache.loadCart());
+  const [wishlist, setWishlist] = useState<Product[]>(() => offlineCache.loadWishlist());
+  const [selectedLocation, setSelectedLocation] = useState<DeliveryZoneSelection>(() =>
+    offlineCache.loadLocation()
+  );
+  const [isAccessHubOpen, setIsAccessHubOpen] = useState(false);
+  const deepLinkAppliedRef = useRef(false);
+
+  useEffect(() => {
+    offlineCache.saveCart(cart);
+  }, [cart]);
+
+  useEffect(() => {
+    offlineCache.saveWishlist(wishlist);
+  }, [wishlist]);
+
+  useEffect(() => {
+    offlineCache.saveLocation(selectedLocation);
+  }, [selectedLocation]);
+
+  useEffect(() => {
+    if (products.length > 0) {
+      offlineCache.saveProducts(products);
+    }
+  }, [products]);
 
   // Filter & Search State
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -148,7 +226,7 @@ export default function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isSystemLoginOpen, setIsSystemLoginOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [adminInitialTab, setAdminInitialTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema'>('activity');
+  const [adminInitialTab, setAdminInitialTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat'>('activity');
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [checkoutDiscount, setCheckoutDiscount] = useState(0);
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<PaymentMethod>('mtn');
@@ -200,6 +278,76 @@ export default function App() {
     showToast(`Color theme updated`);
   };
 
+  // Support deep-link sharing & QR scanning (?product=, ?category=, ?q=, ?zone=)
+  useEffect(() => {
+    if (deepLinkAppliedRef.current || products.length === 0) return;
+    deepLinkAppliedRef.current = true;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const prodParam = params.get('product');
+      const catParam = params.get('category');
+      const qParam = params.get('q');
+      const zoneParam = params.get('zone');
+
+      if (zoneParam) {
+        const matchedZone = RWANDA_LOCATIONS.find(
+          (l) => l.district.toLowerCase() === zoneParam.toLowerCase()
+        );
+        if (matchedZone) {
+          setSelectedLocation({
+            district: matchedZone.district,
+            sector: matchedZone.sectors[0],
+            fee: matchedZone.fee,
+            estimatedHours: matchedZone.estimatedHours,
+            fulfillmentMode: matchedZone.mode || 'delivery',
+          });
+        }
+      }
+
+      if (catParam) {
+        setSelectedCategory(catParam);
+        setTimeout(() => document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' }), 200);
+      }
+
+      if (qParam) {
+        setSearchQuery(qParam);
+        setTimeout(() => document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' }), 200);
+      }
+
+      if (prodParam) {
+        const pid = Number(prodParam);
+        const found = products.find((p) => p.id === pid);
+        if (found) {
+          setQuickViewProduct(found);
+        }
+      }
+    } catch {
+      // Ignore malformed query params
+    }
+  }, [products]);
+
+  const handleShareProduct = async (product: Product) => {
+    const shareUrl = offlineCache.buildProductShareUrl(product.id);
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `${product.name} — Fofo Green`,
+          text: `${product.name} (${product.price.toLocaleString()} FRW / ${product.spec})`,
+          url: shareUrl,
+        });
+        return;
+      } catch {
+        // Fallback to clipboard copy
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      showToast(`Direct product link copied for ${product.name}`);
+    } catch {
+      setQuickViewProduct(product);
+    }
+  };
+
   // Translations shortcut
   const t = TRANSLATIONS[currentLang];
 
@@ -212,9 +360,18 @@ export default function App() {
     return counts;
   }, [products]);
 
+  const customerPermittedCount = useMemo(
+    () => products.filter((p) => isProductPermittedForCustomerCapacity(p, currentUser)).length,
+    [products, currentUser]
+  );
+
   // Filtered & Sorted Products
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
+      // Customer permitted products filter
+      if (permittedOnly && !isProductPermittedForCustomerCapacity(p, currentUser)) {
+        return false;
+      }
       // Category filter
       if (selectedCategory !== 'all' && p.category !== selectedCategory) {
         return false;
@@ -241,10 +398,28 @@ export default function App() {
       if (sortBy === 'rating') return b.rating - a.rating;
       return 0; // featured maintains original order
     });
-  }, [products, selectedCategory, searchQuery, inStockOnly, sortBy]);
+  }, [products, selectedCategory, searchQuery, inStockOnly, sortBy, permittedOnly, currentUser]);
 
-  // Cart operations
+  // Prompt customer sign-in before adding or purchasing products
+  const handleRequireAuthForProduct = (product: Product, quantity: number = 1) => {
+    pendingCartActionRef.current = { product, quantity };
+    setIsAuthOpen(true);
+    showToast('Sign in as a customer to purchase permitted products');
+  };
+
+  // Cart operations (gated by customer sign-in and purchase capacity)
   const handleAddToCart = (product: Product, quantity: number = 1) => {
+    if (!currentUser) {
+      handleRequireAuthForProduct(product, quantity);
+      return;
+    }
+
+    const access = getProductAccessForUser(product, currentUser);
+    if (!access.permitted) {
+      showToast(access.reason);
+      return;
+    }
+
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
@@ -296,8 +471,14 @@ export default function App() {
     setWishlist((prev) => prev.filter((p) => p.id !== productId));
   };
 
-  // Checkout handling
+  // Checkout handling (requires signed-in customer session)
   const handleProceedToCheckout = (discount: number, payment: PaymentMethod) => {
+    if (!currentUser) {
+      pendingCheckoutRef.current = { discount, payment };
+      setIsAuthOpen(true);
+      showToast('Please sign in as a customer to complete your purchase');
+      return;
+    }
     setCheckoutDiscount(discount);
     setCheckoutPaymentMethod(payment);
     setIsCartOpen(false);
@@ -348,9 +529,18 @@ export default function App() {
   };
 
   const handleAddBundleToCart = (kit: MealKit) => {
+    if (!currentUser) {
+      const firstProd = products.find((p) => kit.productIds.includes(p.id));
+      if (firstProd) {
+        pendingCartActionRef.current = { product: firstProd, quantity: 1 };
+      }
+      setIsAuthOpen(true);
+      showToast('Sign in as a customer to purchase harvest meal kits');
+      return;
+    }
     kit.productIds.forEach((pid) => {
       const prod = products.find((p) => p.id === pid);
-      if (prod) {
+      if (prod && getProductAccessForUser(prod, currentUser).permitted) {
         handleAddToCart(prod, 1);
       }
     });
@@ -443,6 +633,39 @@ export default function App() {
       actor: currentUser ? currentUser.name : 'System Admin',
       actorRole: 'admin',
       metadata: { productId, name: target?.name, inStock: newStatus }
+    };
+    setActivities((prev) => [newAct, ...prev]);
+  };
+
+  const handleToggleCustomerPermitted = async (productId: number) => {
+    const target = products.find((p) => p.id === productId);
+    const nextPermitted = target?.customerPurchasable === false ? true : false;
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId ? { ...p, customerPurchasable: nextPermitted } : p
+      )
+    );
+    showToast(
+      nextPermitted
+        ? `"${target?.name}" is now permitted for Customer purchases`
+        : `"${target?.name}" moved to Staff / Wholesale Reserve`
+    );
+    try {
+      await api.updateProduct(productId, { customerPurchasable: nextPermitted });
+    } catch (e) {
+      console.warn('Sync customer purchase permission error:', e);
+    }
+    const newAct: SystemActivity = {
+      id: `ACT-CPERM-${Date.now().toString().slice(-4)}`,
+      title: `Customer Access Updated: ${nextPermitted ? 'Permitted' : 'Staff Reserve'}`,
+      detail: `"${target?.name}" set to ${nextPermitted ? 'Customer Permitted' : 'Wholesale / Staff Only'}`,
+      time: 'Just now',
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      type: 'product',
+      status: nextPermitted ? 'success' : 'info',
+      actor: currentUser ? currentUser.name : 'System Admin',
+      actorRole: 'admin',
+      metadata: { productId, name: target?.name, customerPurchasable: nextPermitted }
     };
     setActivities((prev) => [newAct, ...prev]);
   };
@@ -542,9 +765,14 @@ export default function App() {
 
   // 1-Click Role Switcher across all 6 roles
   const handleSwitchRole = (newRole: UserRole) => {
+    manualSessionRef.current = true;
     const matched = users.find(u => u.role === newRole);
     if (matched) {
-      setCurrentUser(matched);
+      setCurrentUser({
+        ...matched,
+        status: matched.status || 'active',
+        permissions: matched.permissions || DEFAULT_ROLE_PERMISSIONS[newRole]
+      });
     } else {
       const fallbackUser: User = {
         id: `usr-${newRole}-session`,
@@ -591,12 +819,26 @@ export default function App() {
     setActivities((prev) => [act, ...prev]);
 
     // Open corresponding workspace immediately
-    if (newRole === 'admin') setIsAdminOpen(true);
-    else if (newRole === 'stock_manager') setIsStockManagerOpen(true);
-    else if (newRole === 'cashier') setIsCashierOpen(true);
-    else if (newRole === 'sales_attendant') setIsSalesAttendantOpen(true);
-    else if (newRole === 'accountant') setIsAccountantOpen(true);
-    else if (newRole === 'customer') setIsCustomerMarketOpen(true);
+    if (newRole === 'admin') {
+      setPermittedOnly(false);
+      setIsAdminOpen(true);
+    } else if (newRole === 'stock_manager') {
+      setPermittedOnly(false);
+      setIsStockManagerOpen(true);
+    } else if (newRole === 'cashier') {
+      setPermittedOnly(false);
+      setIsCashierOpen(true);
+    } else if (newRole === 'sales_attendant') {
+      setPermittedOnly(false);
+      setIsSalesAttendantOpen(true);
+    } else if (newRole === 'accountant') {
+      setPermittedOnly(false);
+      setIsAccountantOpen(true);
+    } else if (newRole === 'customer') {
+      setPermittedOnly(true);
+      setSelectedCategory('all');
+      setIsCustomerMarketOpen(true);
+    }
   };
 
   const handleOpenActiveWorkspace = () => {
@@ -805,37 +1047,114 @@ export default function App() {
     showToast('System action logs reset to default test state');
   };
 
-  // User login handler
+  // User login handler — unlocks permitted products immediately when logged in as customer
   const handleUserLogin = (user: User) => {
-    setCurrentUser(user);
-    setUsers((prev) => [user, ...prev.filter((member) => member.id !== user.id)]);
-    if (openChatAfterLogin) {
+    const normalizedUser: User = {
+      ...user,
+      status: user.status || 'active',
+      permissions: user.permissions || DEFAULT_ROLE_PERMISSIONS[user.role],
+    };
+    manualSessionRef.current = true;
+    setCurrentUser(normalizedUser);
+    setUsers((prev) => [normalizedUser, ...prev.filter((member) => member.id !== normalizedUser.id)]);
+
+    const wasChatQueued = openChatAfterLogin;
+    if (wasChatQueued) {
       setIsCommunityChatOpen(true);
       setOpenChatAfterLogin(false);
     }
 
     const authAct: SystemActivity = {
       id: `ACT-AUTH-${Date.now().toString().slice(-4)}`,
-      title: user.role === 'admin' ? 'Admin Session Authenticated' : 'Customer Account Login',
-      detail: `${user.name} (${user.email}) signed in with role: ${user.role.toUpperCase()}`,
+      title: normalizedUser.role === 'admin' ? 'Admin Session Authenticated' : 'Customer Account Login',
+      detail: `${normalizedUser.name} (${normalizedUser.email}) signed in with role: ${normalizedUser.role.toUpperCase()}`,
       time: 'Just now',
       timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
       type: 'user',
       status: 'success',
-      actor: user.name,
-      actorRole: user.role,
-      metadata: { email: user.email, phone: user.phone, role: user.role }
+      actor: normalizedUser.name,
+      actorRole: normalizedUser.role,
+      metadata: { email: normalizedUser.email, phone: normalizedUser.phone, role: normalizedUser.role }
     };
     setActivities((prev) => [authAct, ...prev]);
 
-    if (user.role === 'admin') {
-      showToast(`👑 Logged in as Administrator: ${user.name}`);
+    if (normalizedUser.role === 'admin') {
+      setPermittedOnly(false);
+      pendingCartActionRef.current = null;
+      pendingCheckoutRef.current = null;
+      setOpenMarketAfterLogin(false);
+      showToast(`Logged in as Administrator: ${normalizedUser.name}`);
       // Immediately open Admin Panel on the Activity / System Actions Audit tab!
       setAdminInitialTab('activity');
       setIsAdminOpen(true);
-    } else {
-      showToast(`Welcome back, ${user.name}!`);
+      return;
     }
+
+    if (normalizedUser.role === 'customer') {
+      setPermittedOnly(true);
+      setSelectedCategory('all');
+
+      const permittedCount = products.filter((p) =>
+        isProductPermittedForCustomerCapacity(p, normalizedUser)
+      ).length;
+
+      let itemQueuedAdded = false;
+      const pendingAdd = pendingCartActionRef.current;
+      if (pendingAdd) {
+        pendingCartActionRef.current = null;
+        const access = getProductAccessForUser(pendingAdd.product, normalizedUser);
+        if (access.permitted) {
+          setCart((prev) => {
+            const existing = prev.find((item) => item.product.id === pendingAdd.product.id);
+            if (existing) {
+              return prev.map((item) =>
+                item.product.id === pendingAdd.product.id
+                  ? { ...item, quantity: item.quantity + pendingAdd.quantity }
+                  : item
+              );
+            }
+            return [...prev, { product: pendingAdd.product, quantity: pendingAdd.quantity }];
+          });
+          itemQueuedAdded = true;
+          showToast(`Signed in — added ${pendingAdd.product.name} to basket`);
+        } else {
+          showToast(access.reason);
+        }
+      }
+
+      const pendingCheckout = pendingCheckoutRef.current;
+      if (pendingCheckout) {
+        pendingCheckoutRef.current = null;
+        if (cart.length > 0 || itemQueuedAdded) {
+          setCheckoutDiscount(pendingCheckout.discount);
+          setCheckoutPaymentMethod(pendingCheckout.payment);
+          setIsCartOpen(false);
+          setIsCheckoutOpen(true);
+          return;
+        }
+      }
+
+      if (openMarketAfterLogin) {
+        setOpenMarketAfterLogin(false);
+        setIsCustomerMarketOpen(true);
+        return;
+      }
+
+      if (!wasChatQueued && !itemQueuedAdded) {
+        showToast(
+          `Signed in as ${normalizedUser.name} — ${permittedCount} permitted products unlocked for purchase`
+        );
+        setTimeout(() => {
+          document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' });
+        }, 120);
+      }
+      return;
+    }
+
+    // Other operational staff roles
+    setPermittedOnly(false);
+    setOpenMarketAfterLogin(false);
+    showToast(`Welcome back, ${normalizedUser.name}!`);
   };
 
   // Reviews operations
@@ -891,7 +1210,13 @@ export default function App() {
   const isRtl = currentLang === 'ar';
 
   return (
-    <div className={`min-h-screen bg-[#fafaf8] text-stone-900 font-sans selection:bg-emerald-200 selection:text-emerald-950 ${isRtl ? 'rtl' : 'ltr'}`} dir={isRtl ? 'rtl' : 'ltr'}>
+    <RealtimeCommunityProvider
+      currentUser={currentUser}
+      isChatModalOpen={isCommunityChatOpen}
+      onOpenChatModal={openCommunityChat}
+    >
+      <LivePresenceNotifications />
+      <div className={`min-h-screen pb-16 md:pb-0 bg-[#fafaf8] text-stone-900 font-sans selection:bg-emerald-200 selection:text-emerald-950 ${isRtl ? 'rtl' : 'ltr'}`} dir={isRtl ? 'rtl' : 'ltr'}>
       
       {/* Toast alert */}
       {toastMessage && (
@@ -906,6 +1231,7 @@ export default function App() {
         currentUser={currentUser}
         onSwitchRole={handleSwitchRole}
         onOpenActiveWorkspace={handleOpenActiveWorkspace}
+        onOpenAuth={() => setIsAuthOpen(true)}
         stockAlertsCount={stockAlerts.filter(a => a.status === 'pending').length}
       />
 
@@ -946,17 +1272,34 @@ export default function App() {
 
               <button
                 onClick={() => {
-                  setAdminInitialTab('reports');
+                  setAdminInitialTab('chat');
                   setIsAdminOpen(true);
                 }}
-                className="bg-stone-800 hover:bg-stone-700 text-stone-300 font-semibold px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer"
+                className="bg-amber-500 hover:bg-amber-400 text-stone-950 font-black px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                title="View and moderate all Customer Support Chat Messages in Admin Panel"
               >
-                Profit Reports
+                <MessageSquare className="w-3.5 h-3.5 text-stone-950" />
+                <span>Support Messages (Q&A)</span>
+              </button>
+
+              <button
+                onClick={openCommunityChat}
+                className="bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/80 font-bold px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                title="Launch Live Customer Support Chat Modal"
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Live Chat Lounge</span>
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Offline Connectivity Banner (non-sticky, active only when offline) */}
+      <OfflineIndicator
+        cachedProductsCount={products.length}
+        onOpenAccessHub={() => setIsAccessHubOpen(true)}
+      />
 
       {/* Top Navigation */}
       <Navbar
@@ -973,6 +1316,12 @@ export default function App() {
         }}
         currentUser={currentUser}
         onLogout={() => {
+          manualSessionRef.current = false;
+          setPermittedOnly(false);
+          pendingCartActionRef.current = null;
+          pendingCheckoutRef.current = null;
+          setOpenMarketAfterLogin(false);
+          signOut(auth).catch(() => {});
           setCurrentUser(null);
           showToast('Signed out successfully');
         }}
@@ -986,8 +1335,9 @@ export default function App() {
         onOpenCashier={() => setIsCashierOpen(true)}
         onOpenSalesAttendant={() => setIsSalesAttendantOpen(true)}
         onOpenAccountant={() => setIsAccountantOpen(true)}
-        onOpenCustomerFruitMarket={() => setIsCustomerMarketOpen(true)}
+        onOpenCustomerFruitMarket={openCustomerMarket}
         onOpenCommunityChat={openCommunityChat}
+        onOpenAccessHub={() => setIsAccessHubOpen(true)}
       />
 
       {/* Hero Section with Live Search and Minimize Mode */}
@@ -1055,6 +1405,121 @@ export default function App() {
           </div>
         </div>
 
+        {/* Access Anywhere & Active Zone Bar */}
+        <div className="mb-6 p-3.5 rounded-2xl bg-white border border-stone-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-stone-700">
+            <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
+            <span className="font-semibold text-stone-900">
+              {selectedLocation.sector} · {selectedLocation.district}
+            </span>
+            <span className="text-stone-400" aria-hidden="true">/</span>
+            <span className="tabular-nums text-stone-600">
+              {selectedLocation.estimatedHours} ·{' '}
+              {selectedLocation.fee === 0
+                ? 'Free Pickup (0 FRW)'
+                : `${selectedLocation.fee.toLocaleString()} FRW`}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsAccessHubOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-stone-300 bg-stone-50 hover:bg-stone-100 text-stone-800 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Change Zone / Access Anywhere</span>
+            </button>
+            <PWAInstallButton
+              compact
+              onInstalled={() => showToast('Fofo Green installed to your device')}
+            />
+          </div>
+        </div>
+
+        {/* Customer Purchasing Capacity Bar */}
+        <div className="mb-6 p-3.5 rounded-2xl bg-white border border-stone-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {!currentUser ? (
+            <>
+              <div className="flex items-center gap-2.5 text-xs text-stone-700">
+                <Lock className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>
+                  <strong className="text-stone-900">Sign in to buy:</strong> Sign in as a customer to immediately access{' '}
+                  <span className="tabular-nums font-semibold text-emerald-800">{customerPermittedCount}</span> permitted products for purchase.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAuthOpen(true)}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Customer Sign In</span>
+              </button>
+            </>
+          ) : currentUser.role === 'customer' ? (
+            <>
+              <div className="flex items-center gap-2.5 text-xs text-stone-700">
+                <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span className="tabular-nums">
+                  <strong className="text-stone-900">Customer Access Active:</strong>{' '}
+                  <strong className="text-emerald-800">{customerPermittedCount}</strong> permitted products ready to buy for{' '}
+                  <span className="font-semibold text-stone-900">{currentUser.name}</span>
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPermittedOnly((prev) => !prev)}
+                  className={`px-3 py-2 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                    permittedOnly
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                      : 'bg-stone-50 border-stone-300 text-stone-700 hover:bg-stone-100'
+                  }`}
+                >
+                  {permittedOnly ? 'Showing Permitted Only' : 'Show All Catalog'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomerMarketOpen(true)}
+                  className="px-3 py-2 rounded-xl border border-stone-300 bg-white hover:bg-stone-50 text-stone-800 text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                >
+                  Open Customer Market
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCartOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors tabular-nums"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>Basket ({cartTotalItems})</span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2.5 text-xs text-stone-700">
+                <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span className="tabular-nums">
+                  Signed in as <strong className="text-stone-900">{currentUser.name}</strong> ({currentUser.role.replace(/_/g, ' ')}) ·{' '}
+                  <strong className="text-emerald-800">{customerPermittedCount}</strong> customer-permitted products
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPermittedOnly((prev) => !prev)}
+                className={`px-3 py-2 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                  permittedOnly
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                    : 'bg-stone-50 border-stone-300 text-stone-700 hover:bg-stone-100'
+                }`}
+              >
+                {permittedOnly ? 'Showing Customer-Permitted' : 'Filter Customer-Permitted'}
+              </button>
+            </>
+          )}
+        </div>
+
         {/* Results Count / Search indicator */}
         <div className="flex items-center justify-between text-xs text-stone-500 mb-6 pb-2 border-b border-stone-200/80">
           <div>
@@ -1114,6 +1579,9 @@ export default function App() {
                   onUpdateCartQuantity={handleUpdateCartQuantity}
                   onQuickView={(p) => setQuickViewProduct(p)}
                   onOpenFarmPassport={handleOpenFarmPassport}
+                  onShareProduct={handleShareProduct}
+                  purchaseAccess={getProductAccessForUser(product, currentUser)}
+                  onRequireAuth={(p) => handleRequireAuthForProduct(p, 1)}
                 />
               );
             })}
@@ -1140,7 +1608,9 @@ export default function App() {
 
       {/* Delivery Zones & Logistics */}
       <DeliverySection 
-        currentLang={currentLang} 
+        currentLang={currentLang}
+        selectedLocation={selectedLocation}
+        onSelectLocation={setSelectedLocation}
         onShopClick={() => {
           const el = document.getElementById('shop');
           if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -1162,6 +1632,9 @@ export default function App() {
         onToggleWishlist={handleToggleWishlist}
         isInWishlist={Boolean(quickViewProduct && wishlist.some((w) => w.id === quickViewProduct.id))}
         onOpenFarmPassport={handleOpenFarmPassport}
+        onShowToast={showToast}
+        purchaseAccess={quickViewProduct ? getProductAccessForUser(quickViewProduct, currentUser) : undefined}
+        onRequireAuth={(p, q) => handleRequireAuthForProduct(p, q)}
       />
 
       {/* Cart Sidebar */}
@@ -1193,6 +1666,7 @@ export default function App() {
         currentLang={currentLang}
         discountAmount={checkoutDiscount}
         initialPaymentMethod={checkoutPaymentMethod}
+        selectedLocation={selectedLocation}
         onOrderComplete={handleOrderComplete}
         onReturnToCart={() => {
           setIsCheckoutOpen(false);
@@ -1230,6 +1704,7 @@ export default function App() {
         onAddProduct={handleAddProduct}
         onDeleteProduct={handleDeleteProduct}
         onToggleStock={handleToggleStock}
+        onToggleCustomerPermitted={handleToggleCustomerPermitted}
         orders={orders}
         onUpdateOrderStatus={handleUpdateOrderStatus}
         users={users}
@@ -1252,6 +1727,7 @@ export default function App() {
         onOpenSalesAttendant={() => setIsSalesAttendantOpen(true)}
         onOpenAccountant={() => setIsAccountantOpen(true)}
         onOpenCustomerMarket={() => setIsCustomerMarketOpen(true)}
+        onOpenCommunityChat={openCommunityChat}
       />
 
       {/* Role 2: Stock Manager Workspace */}
@@ -1309,6 +1785,7 @@ export default function App() {
         onOpenReceipt={(receipt) => setActiveReceiptModal(receipt)}
         customerName={currentUser?.name || 'Divine Uwase'}
         customerPhone={currentUser?.phone || '+250 789 112 334'}
+        currentUser={currentUser}
       />
 
       {/* Official Sales Receipt Modal with Printing & Customer Feedback */}
@@ -1354,10 +1831,41 @@ export default function App() {
         joinedUsers={users}
       />
 
-      {/* Floating Member Lounge & Live Chat Capsule */}
+      {/* Access Anywhere Modal (Nationwide Zones, Offline PWA, QR Handoff, WhatsApp/USSD) */}
+      <AccessAnywhereModal
+        isOpen={isAccessHubOpen}
+        onClose={() => setIsAccessHubOpen(false)}
+        selectedLocation={selectedLocation}
+        onSelectLocation={setSelectedLocation}
+        products={products}
+        cart={cart}
+        isCompactMode={isHeroMinimized}
+        onToggleCompactMode={handleToggleHeroMinimized}
+        onRefreshOfflineCache={() => offlineCache.saveProducts(products)}
+        onShowToast={showToast}
+      />
+
+      {/* Mobile Bottom Thumb-Zone Navigation (< 768px) */}
+      <MobileBottomNav
+        cartCount={cartTotalItems}
+        onScrollToShop={() => document.getElementById('shop')?.scrollIntoView({ behavior: 'smooth' })}
+        onFocusSearch={() => {
+          const hero = document.getElementById('home');
+          hero?.scrollIntoView({ behavior: 'smooth' });
+          setTimeout(() => {
+            const input = hero?.querySelector<HTMLInputElement>('input[type="text"]');
+            input?.focus();
+          }, 250);
+        }}
+        onOpenAccessHub={() => setIsAccessHubOpen(true)}
+        onOpenCart={() => setIsCartOpen(true)}
+        onOpenSupport={openCommunityChat}
+      />
+
+      {/* Floating Member Lounge & Live Chat Capsule (desktop; mobile uses MobileBottomNav Support) */}
       <button
         onClick={openCommunityChat}
-        className="fixed bottom-6 left-6 z-40 bg-emerald-900 hover:bg-emerald-800 active:scale-95 text-white px-4 py-2.5 rounded-full shadow-2xl border border-emerald-600/70 flex items-center gap-2.5 transition-all cursor-pointer group"
+        className="hidden md:flex fixed bottom-6 left-6 z-40 bg-emerald-900 hover:bg-emerald-800 active:scale-95 text-white px-4 py-2.5 rounded-full shadow-2xl border border-emerald-600/70 items-center gap-2.5 transition-all cursor-pointer group"
         title="Open Fofo Green Member Lounge & Live Chat (Urubuga rw'Abanyamuryango)"
       >
         <div className="relative">
@@ -1372,7 +1880,7 @@ export default function App() {
           <span className="text-[9px] text-emerald-200 font-bold leading-none mt-0.5">Live Community Chat</span>
         </div>
       </button>
-
     </div>
+  </RealtimeCommunityProvider>
   );
 }

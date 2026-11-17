@@ -1,27 +1,59 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Clock, ShieldCheck, MapPin, Truck, CheckCircle2, ArrowRight } from 'lucide-react';
-import { Language } from '../types';
+import { DeliveryZoneSelection, Language } from '../types';
 import { TRANSLATIONS } from '../data/translations';
 import { RWANDA_LOCATIONS } from '../data/mockData';
 
 interface DeliverySectionProps {
   currentLang: Language;
   onShopClick: () => void;
+  selectedLocation?: DeliveryZoneSelection;
+  onSelectLocation?: (loc: DeliveryZoneSelection) => void;
 }
 
-export const DeliverySection: React.FC<DeliverySectionProps> = ({ currentLang, onShopClick }) => {
+export const DeliverySection: React.FC<DeliverySectionProps> = ({
+  currentLang,
+  onShopClick,
+  selectedLocation,
+  onSelectLocation,
+}) => {
   const t = TRANSLATIONS[currentLang].delivery;
   
-  const [selectedDistrict, setSelectedDistrict] = useState(RWANDA_LOCATIONS[0].district);
+  const [selectedDistrict, setSelectedDistrict] = useState(selectedLocation?.district || RWANDA_LOCATIONS[0].district);
   const currentDistrictData = RWANDA_LOCATIONS.find(d => d.district === selectedDistrict) || RWANDA_LOCATIONS[0];
-  const [selectedSector, setSelectedSector] = useState(currentDistrictData.sectors[0]);
+  const [selectedSector, setSelectedSector] = useState(selectedLocation?.sector || currentDistrictData.sectors[0]);
+
+  useEffect(() => {
+    if (selectedLocation) {
+      setSelectedDistrict(selectedLocation.district);
+      setSelectedSector(selectedLocation.sector);
+    }
+  }, [selectedLocation]);
 
   const handleDistrictChange = (districtName: string) => {
     setSelectedDistrict(districtName);
     const found = RWANDA_LOCATIONS.find(d => d.district === districtName);
     if (found) {
       setSelectedSector(found.sectors[0]);
+      onSelectLocation?.({
+        district: found.district,
+        sector: found.sectors[0],
+        fee: found.fee,
+        estimatedHours: found.estimatedHours,
+        fulfillmentMode: found.mode || 'delivery',
+      });
     }
+  };
+
+  const handleSectorChange = (sec: string) => {
+    setSelectedSector(sec);
+    onSelectLocation?.({
+      district: currentDistrictData.district,
+      sector: sec,
+      fee: currentDistrictData.fee,
+      estimatedHours: currentDistrictData.estimatedHours,
+      fulfillmentMode: currentDistrictData.mode || 'delivery',
+    });
   };
 
   return (
@@ -118,7 +150,7 @@ export const DeliverySection: React.FC<DeliverySectionProps> = ({ currentLang, o
                   </label>
                   <select
                     value={selectedSector}
-                    onChange={(e) => setSelectedSector(e.target.value)}
+                    onChange={(e) => handleSectorChange(e.target.value)}
                     className="w-full bg-stone-50 border border-stone-300 rounded-xl px-3 py-2.5 text-xs sm:text-sm font-medium text-stone-900 focus:outline-emerald-600 cursor-pointer"
                   >
                     {currentDistrictData.sectors.map((sec) => (

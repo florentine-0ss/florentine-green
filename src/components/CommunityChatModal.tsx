@@ -85,7 +85,6 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   const { activeChatTarget, clearActiveChatTarget, onlineUsers: globalOnlineUsers } = useRealtimeCommunity();
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string>('general');
-  const [directRecipient, setDirectRecipient] = useState<User | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
@@ -97,6 +96,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   const [isTyping, setIsTyping] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'channels' | 'members'>('channels');
+  const [adminFilter, setAdminFilter] = useState<'all' | 'pending' | 'answered'>('all');
 
   // Media & Attachment States
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
@@ -137,26 +137,29 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     if (isOpen) {
       scrollToBottom();
     }
-  }, [messages, activeChannelId, directRecipient, isOpen, activeCall]);
+  }, [messages, activeChannelId, isOpen, activeCall]);
 
-  // Handle immediate response targeting from live presence notification toast
+  // Handle immediate response targeting from live presence notification toast (always public)
   useEffect(() => {
     if (isOpen && activeChatTarget) {
       if (activeChatTarget.channelId) {
-        setActiveChannelId(activeChatTarget.channelId);
-        setDirectRecipient(null);
-      }
-      if (activeChatTarget.user) {
-        const found = joinedUsers.find(u => String(u.id) === activeChatTarget.user?.userId);
-        if (found) {
-          setDirectRecipient(found);
-        }
+        const publicChannel = activeChatTarget.channelId.startsWith('dm:')
+          ? 'general'
+          : activeChatTarget.channelId;
+        setActiveChannelId(publicChannel);
+      } else if (activeChatTarget.user) {
+        const targetIsStaff = activeChatTarget.user.role !== 'customer' && currentUser && currentUser.role !== 'customer';
+        setActiveChannelId(targetIsStaff ? 'staff-internal' : 'general');
       }
       if (activeChatTarget.prefillReply) {
         setInputText(activeChatTarget.prefillReply);
+      } else if (activeChatTarget.user) {
+        setInputText(`@${activeChatTarget.user.userName} `);
       }
       setTimeout(() => {
-        const inputElem = document.querySelector('textarea[placeholder*="Type a message"], input[placeholder*="Type a message"]') as HTMLInputElement | HTMLTextAreaElement;
+        const inputElem = document.querySelector(
+          'input[placeholder*="Ask a question"], input[placeholder*="Message #"], input[placeholder*="Replying"], input[placeholder*="official announcement"]'
+        ) as HTMLInputElement | null;
         if (inputElem) {
           inputElem.focus();
           inputElem.setSelectionRange(inputElem.value.length, inputElem.value.length);
@@ -164,26 +167,16 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       }, 150);
       clearActiveChatTarget();
     }
-  }, [isOpen, activeChatTarget, joinedUsers, clearActiveChatTarget]);
+  }, [isOpen, activeChatTarget, currentUser, clearActiveChatTarget]);
 
-  // If a staff member opens the chat without a specific target, auto-direct them to any pending Admin DM or staff-internal channel
+  // If a non-admin staff member opens the chat without a specific target, default to the shared public staff-internal channel
   useEffect(() => {
-    if (isOpen && currentUser && currentUser.role !== 'customer' && !activeChatTarget) {
-      if (currentUser.role !== 'admin') {
-        const adminDmChannel = getDmChannelId(currentUser.id, 'usr-admin');
-        const hasAdminDm = messages.some(m => m.channelId === adminDmChannel && m.senderId === 'usr-admin');
-        const adminUser = joinedUsers.find(u => u.id === 'usr-admin' || u.role === 'admin');
-
-        if (hasAdminDm && adminUser && activeChannelId === 'general' && !directRecipient) {
-          setDirectRecipient(adminUser);
-          return;
-        }
-      }
-      if (activeChannelId === 'general' && !directRecipient) {
+    if (isOpen && currentUser && currentUser.role !== 'customer' && currentUser.role !== 'admin' && !activeChatTarget) {
+      if (activeChannelId === 'general') {
         setActiveChannelId('staff-internal');
       }
     }
-  }, [isOpen, currentUser, messages, joinedUsers]);
+  }, [isOpen, currentUser, activeChatTarget, activeChannelId]);
 
   // Keep online users synced with global presence
   useEffect(() => {
@@ -317,6 +310,22 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
               break;
             }
 
+            case 'chat:delete': {
+              const { messageId } = data.payload || {};
+              if (messageId) {
+                setMessages(prev => prev.filter(m => m.id !== messageId));
+              }
+              break;
+            }
+
+            case 'chat:status': {
+              const { messageId, status, message } = data.payload || {};
+              if (messageId) {
+                setMessages(prev => prev.map(m => m.id === messageId ? (message || { ...m, status }) : m));
+              }
+              break;
+            }
+
             case 'presence:update': {
               if (data.payload?.onlineUsers) {
                 setOnlineUsers(data.payload.onlineUsers);
@@ -350,14 +359,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     };
   }, [isOpen, currentUser]);
 
-  const getDmChannelId = (userA: string, userB: string) => {
-    const sorted = [userA, userB].sort();
-    return `dm:${sorted[0]}-${sorted[1]}`;
-  };
-
-  const currentChannel = directRecipient && currentUser
-    ? getDmChannelId(currentUser.id, directRecipient.id)
-    : activeChannelId;
+  const currentChannel = activeChannelId;
 
   // Handle typing notification
   const handleInputChange = (text: string) => {
@@ -373,21 +375,28 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     }
   };
 
-  // Switch to a Channel
+  // Switch to a Public Channel
   const handleSelectChannel = (channelId: string) => {
-    setDirectRecipient(null);
     setActiveChannelId(channelId);
     setReplyingTo(null);
   };
 
-  // Switch to a Direct Message with another joined member
-  const handleSelectMemberDM = (member: User) => {
+  // Mention a member inside a public channel (no private 1-on-1 DMs)
+  const handleMentionMemberInPublicChat = (member: User) => {
     if (!currentUser) {
       onOpenAuth();
       return;
     }
-    setDirectRecipient(member);
+    const targetChannel = currentUser.role !== 'customer' && member.role !== 'customer'
+      ? 'staff-internal'
+      : 'general';
+    setActiveChannelId(targetChannel);
+    setSidebarTab('channels');
     setReplyingTo(null);
+    setInputText(prev => {
+      const mention = `@${member.name} `;
+      return prev.startsWith(mention) ? prev : `${mention}${prev}`;
+    });
   };
 
   // --- VOICE NOTE RECORDING HANDLERS ---
@@ -479,7 +488,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       startedBy: currentUser.id,
       startedByName: currentUser.name,
       channelId: currentChannel,
-      recipientName: directRecipient?.name || activeChannelDef?.name || 'General Lounge',
+      recipientName: activeChannelDef?.name || 'General Lounge',
       durationSeconds: 0
     };
 
@@ -548,6 +557,9 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       return;
     }
 
+    const isOfficialReply = currentUser.role === 'admin' && Boolean(replyingTo);
+    const now = new Date();
+
     const payload: Partial<ChatMessage> = {
       channelId: currentChannel,
       senderId: currentUser.id,
@@ -555,6 +567,10 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       senderRole: currentUser.role,
       content: inputText.trim() || (pendingVoiceNote ? '🎙️ Voice message' : pendingAttachments.length > 0 ? '📎 Attachment' : ''),
       reactions: {},
+      isOfficialReply,
+      status: isOfficialReply ? 'answered' : (currentUser.role === 'customer' ? 'pending' : undefined),
+      answeredBy: isOfficialReply ? currentUser.name : undefined,
+      answeredAt: isOfficialReply ? now.toISOString() : undefined,
       replyTo: replyingTo ? {
         id: replyingTo.id,
         senderName: replyingTo.senderName,
@@ -569,9 +585,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       } : undefined,
       attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
       voiceNote: pendingVoiceNote || undefined,
-      isDirectMessage: !!directRecipient,
-      recipientId: directRecipient?.id,
-      recipientName: directRecipient?.name
+      isDirectMessage: false
     };
 
     // Optimistic UI update
@@ -582,17 +596,24 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       senderName: currentUser.name,
       senderRole: currentUser.role,
       content: payload.content || '',
-      timestamp: new Date().toISOString(),
-      timeFormatted: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: now.toISOString(),
+      timeFormatted: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       reactions: {},
+      isOfficialReply,
+      status: payload.status,
+      answeredBy: payload.answeredBy,
+      answeredAt: payload.answeredAt,
       replyTo: payload.replyTo,
       productTag: payload.productTag,
       attachments: payload.attachments,
       voiceNote: payload.voiceNote,
-      isDirectMessage: !!directRecipient,
-      recipientId: directRecipient?.id,
-      recipientName: directRecipient?.name
+      isDirectMessage: false
     };
+
+    // If Admin is answering a customer question, update the question's status optimistically
+    if (isOfficialReply && replyingTo?.id) {
+      setMessages(prev => prev.map(m => m.id === replyingTo.id ? { ...m, status: 'answered', answeredBy: currentUser.name, answeredAt: now.toISOString() } : m));
+    }
 
     setMessages(prev => [...prev, optimisticMsg]);
     setInputText('');
@@ -651,9 +672,68 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     setShowEmojiPicker(null);
   };
 
+  // Admin message deletion (Requirement 5)
+  const handleDeleteMessage = async (messageId: string) => {
+    if (currentUser?.role !== 'admin') return;
+    if (!window.confirm('Delete this message from the public customer support chat?')) return;
+
+    setMessages(prev => prev.filter(m => m.id !== messageId));
+
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'chat:delete',
+        payload: { messageId }
+      }));
+    } else {
+      try {
+        await fetch(`/api/chat/messages/${messageId}?role=${currentUser.role}`, {
+          method: 'DELETE'
+        });
+      } catch (err) {
+        console.error('Delete message error:', err);
+      }
+    }
+  };
+
+  // Admin question status toggle (Requirement 5)
+  const handleToggleStatus = async (messageId: string, currentStatus?: 'pending' | 'answered') => {
+    if (currentUser?.role !== 'admin') return;
+    const newStatus = currentStatus === 'answered' ? 'pending' : 'answered';
+
+    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, status: newStatus } : m));
+
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'chat:status',
+        payload: { messageId, status: newStatus }
+      }));
+    } else {
+      try {
+        await fetch(`/api/chat/messages/${messageId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus, role: currentUser.role, answeredBy: currentUser.name })
+        });
+      } catch (err) {
+        console.error('Update status error:', err);
+      }
+    }
+  };
+
   if (!isOpen) return null;
 
   const currentMessages = messages.filter(m => m.channelId === currentChannel);
+  const displayedMessages = currentMessages.filter(m => {
+    if (currentUser?.role === 'admin' && activeChannelId === 'general') {
+      if (adminFilter === 'pending') {
+        return m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer');
+      }
+      if (adminFilter === 'answered') {
+        return m.status === 'answered' || m.isOfficialReply;
+      }
+    }
+    return true;
+  });
   const activeChannelDef = channels.find(c => c.id === activeChannelId) || channels[0];
 
   const filteredMembers = joinedUsers.filter(u => {
@@ -725,23 +805,9 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   const isStaffChatActive = Boolean(
     currentUser && (
       activeChannelId === 'staff-internal' ||
-      activeChannelId === 'staff-support' ||
-      (directRecipient && (directRecipient.role !== 'customer' || currentUser.role !== 'customer'))
+      activeChannelId === 'staff-support'
     )
   );
-
-  const getUnreadCountFromMember = (otherUserId: string) => {
-    if (!currentUser) return 0;
-    const dmChannel = getDmChannelId(currentUser.id, otherUserId);
-    return messages.filter(m => m.channelId === dmChannel && m.senderId === otherUserId).length;
-  };
-
-  const getLastMessageWithMember = (otherUserId: string) => {
-    if (!currentUser) return null;
-    const dmChannel = getDmChannelId(currentUser.id, otherUserId);
-    const dmMsgs = messages.filter(m => m.channelId === dmChannel);
-    return dmMsgs.length > 0 ? dmMsgs[dmMsgs.length - 1] : null;
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-stone-900/75 backdrop-blur-md animate-in fade-in duration-200">
@@ -1020,7 +1086,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
                   <div className="space-y-1">
                     {channels.filter(c => c.category === 'staff' || c.id === 'staff-internal' || c.id === 'staff-support').map((chan) => {
-                      const isActive = !directRecipient && activeChannelId === chan.id;
+                      const isActive = activeChannelId === chan.id;
                       const isDirectiveChan = chan.id === 'staff-internal';
                       return (
                         <button
@@ -1065,7 +1131,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
                   <div className="space-y-1">
                     {channels.filter(c => c.category !== 'staff' && c.id !== 'staff-internal' && c.id !== 'staff-support').map((chan) => {
-                      const isActive = !directRecipient && activeChannelId === chan.id;
+                      const isActive = activeChannelId === chan.id;
                       return (
                         <button
                           key={chan.id}
@@ -1101,109 +1167,15 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                   </div>
                 </div>
 
-                {/* 3. STAFF TEAM DIRECT MESSAGES */}
-                <div>
-                  <div className="pt-2 px-2 text-[10px] font-black uppercase tracking-wider text-amber-900 flex items-center justify-between mb-1">
-                    <span className="flex items-center gap-1.5">
-                      <span>💬</span>
-                      <span>Staff Team Direct Messages</span>
-                    </span>
-                    <Lock className="w-3 h-3 text-stone-400" />
+                {/* 3. PUBLIC CHAT NOTICE */}
+                <div className="p-3 rounded-2xl bg-emerald-50/90 border border-emerald-200/80 text-emerald-950 space-y-1">
+                  <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-emerald-900">
+                    <Radio className="w-3 h-3 text-emerald-600" />
+                    <span>All Chats Are Public</span>
                   </div>
-
-                  <div className="space-y-1">
-                    {joinedUsers.filter(u => u.role !== 'customer').map((user) => {
-                      const isSelected = directRecipient?.id === user.id;
-                      const isSelf = currentUser?.id === user.id;
-                      const online = isUserOnline(user.id);
-                      const unread = getUnreadCountFromMember(user.id);
-                      const lastMsg = getLastMessageWithMember(user.id);
-                      const badge = getRoleBadge(user.role);
-
-                      return (
-                        <button
-                          key={user.id}
-                          onClick={() => handleSelectMemberDM(user)}
-                          className={`w-full text-left px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
-                            isSelected
-                              ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold shadow-2xs'
-                              : 'hover:bg-white text-stone-700 border border-transparent'
-                          }`}
-                        >
-                          <div className="relative shrink-0">
-                            <div className="w-7 h-7 rounded-lg bg-stone-800 text-white text-[11px] font-bold flex items-center justify-center">
-                              {user.name.charAt(0)}
-                            </div>
-                            <span className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white ${
-                              online ? 'bg-emerald-500' : 'bg-stone-300'
-                            }`} />
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1">
-                              <p className="text-xs font-semibold truncate leading-none">
-                                {user.name} {isSelf && <span className="text-[9px] text-stone-400 font-normal">(You)</span>}
-                              </p>
-                              {unread > 0 && !isSelf && (
-                                <span className="text-[8px] bg-amber-500 text-stone-950 font-black px-1.5 py-0.2 rounded-full shrink-0 shadow-xs">
-                                  {user.role === 'admin' ? '👑 Directive' : `${unread} new`}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className={`text-[8px] px-1 py-0.1 rounded font-bold border ${badge.bg}`}>
-                                {badge.label}
-                              </span>
-                              {lastMsg && (
-                                <span className="text-[9px] text-stone-400 truncate italic">
-                                  {lastMsg.content.slice(0, 25)}...
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 4. SHOPPER DIRECT MESSAGES */}
-                <div>
-                  <div className="pt-2 px-2 text-[10px] font-black uppercase tracking-wider text-stone-500 mb-1">
-                    Shopper Direct Messages
-                  </div>
-
-                  <div className="space-y-1">
-                    {joinedUsers.filter(u => u.role === 'customer').slice(0, 3).map((user) => {
-                      const isSelected = directRecipient?.id === user.id;
-                      const online = isUserOnline(user.id);
-                      return (
-                        <button
-                          key={user.id}
-                          onClick={() => handleSelectMemberDM(user)}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
-                            isSelected
-                              ? 'bg-amber-100 border border-amber-300 text-amber-950 font-bold shadow-2xs'
-                              : 'hover:bg-white text-stone-700 border border-transparent'
-                          }`}
-                        >
-                          <div className="relative shrink-0">
-                            <div className="w-6 h-6 rounded-lg bg-stone-700 text-white text-[10px] font-bold flex items-center justify-center">
-                              {user.name.charAt(0)}
-                            </div>
-                            <span className={`absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 rounded-full border border-white ${
-                              online ? 'bg-emerald-500' : 'bg-stone-300'
-                            }`} />
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium truncate leading-none">{user.name}</p>
-                            <span className="text-[9px] text-stone-400 leading-none">Customer</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <p className="text-[10px] text-emerald-800/90 leading-relaxed">
+                    Private direct messages have been removed. All questions, announcements, and replies happen openly in shared public channels.
+                  </p>
                 </div>
 
               </div>
@@ -1235,16 +1207,11 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                     const badge = getRoleBadge(member.role);
                     const online = isUserOnline(member.id);
                     const isSelf = currentUser?.id === member.id;
-                    const isSelected = directRecipient?.id === member.id;
 
                     return (
                       <div
                         key={member.id}
-                        className={`p-2 rounded-xl transition-all border flex items-center justify-between gap-2 ${
-                          isSelected
-                            ? 'bg-amber-50 border-amber-300'
-                            : 'bg-white border-stone-200/80 hover:border-emerald-300'
-                        }`}
+                        className="p-2 rounded-xl transition-all border flex items-center justify-between gap-2 bg-white border-stone-200/80 hover:border-emerald-300"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <div className="relative shrink-0">
@@ -1272,19 +1239,19 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                         {!isSelf && (
                           <div className="flex items-center gap-1 shrink-0">
                             <button
-                              onClick={() => handleSelectMemberDM(member)}
+                              onClick={() => handleMentionMemberInPublicChat(member)}
                               className="px-2 py-1 bg-stone-100 hover:bg-emerald-700 hover:text-white text-stone-700 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
-                              title={`Direct text chat with ${member.name}`}
+                              title={`Mention ${member.name} in public chat`}
                             >
-                              Chat
+                              @Public
                             </button>
                             <button
                               onClick={() => {
-                                handleSelectMemberDM(member);
+                                handleMentionMemberInPublicChat(member);
                                 handleStartCall('voice');
                               }}
                               className="p-1 hover:bg-emerald-100 text-emerald-800 rounded-lg text-[10px] transition-colors cursor-pointer"
-                              title={`Call ${member.name}`}
+                              title={`Start live public voice call`}
                             >
                               <Phone className="w-3.5 h-3.5" />
                             </button>
@@ -1329,54 +1296,79 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
           {/* MAIN CHAT CONVERSATION VIEW */}
           <main className="flex-1 flex flex-col bg-stone-100/60 overflow-hidden">
             
-            {/* Channel / DM Header Bar */}
+            {/* Public Channel Header Bar */}
             <div className="bg-white border-b border-stone-200 px-4 py-2.5 flex items-center justify-between shrink-0 shadow-2xs">
               <div className="flex items-center gap-2 min-w-0">
-                {directRecipient ? (
-                  <>
-                    <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-xs shrink-0">
-                      {directRecipient.name.charAt(0)}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-extrabold text-sm text-stone-900">
-                          {directRecipient.name}
-                        </span>
-                        <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-extrabold border ${getRoleBadge(directRecipient.role).bg}`}>
-                          {getRoleBadge(directRecipient.role).label}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-stone-500 leading-none">
-                        Private 1-on-1 member conversation
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-900 flex items-center justify-center font-bold text-xs shrink-0">
-                      <Hash className="w-4 h-4 text-emerald-800" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-extrabold text-sm text-stone-900">
-                          {activeChannelDef?.name || 'General Lounge'}
-                        </span>
-                        {activeChannelDef?.nameRw && (
-                          <span className="text-[10px] text-stone-400 hidden sm:inline">
-                            • {activeChannelDef.nameRw}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-stone-500 line-clamp-1 leading-none">
-                        {activeChannelDef?.description}
-                      </p>
-                    </div>
-                  </>
-                )}
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-900 flex items-center justify-center font-bold text-xs shrink-0">
+                  {activeChannelId === 'general' ? <HelpCircle className="w-4 h-4 text-emerald-800" /> : <Hash className="w-4 h-4 text-emerald-800" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-extrabold text-sm text-stone-900">
+                      {activeChannelId === 'general' ? 'Public Customer Support Chat' : (activeChannelDef?.name || 'General Lounge')}
+                    </span>
+                    <span className="text-[9px] bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold px-2 py-0.5 rounded-full">
+                      {activeChannelId === 'general' ? 'Shared Public Q&A' : 'Public Channel'}
+                    </span>
+                    {activeChannelId !== 'general' && activeChannelDef?.nameRw && (
+                      <span className="text-[10px] text-stone-400 hidden sm:inline">
+                        • {activeChannelDef.nameRw}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-stone-500 line-clamp-1 leading-none mt-0.5">
+                    {activeChannelId === 'general'
+                      ? 'All customers see the same questions and live Admin replies here.'
+                      : activeChannelDef?.description}
+                  </p>
+                </div>
               </div>
 
-              {/* Direct Call Triggers right in channel header */}
-              <div className="flex items-center gap-2">
+              {/* Admin Moderation Filters and Live Call Triggers */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {currentUser?.role === 'admin' && activeChannelId === 'general' && (
+                  <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200">
+                    <button
+                      onClick={() => setAdminFilter('all')}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                        adminFilter === 'all'
+                          ? 'bg-emerald-800 text-white shadow-2xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                    >
+                      All ({currentMessages.length})
+                    </button>
+                    <button
+                      onClick={() => setAdminFilter('pending')}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        adminFilter === 'pending'
+                          ? 'bg-amber-600 text-white shadow-2xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                      title="Filter questions awaiting Admin response"
+                    >
+                      <span>⏳ Awaiting Reply</span>
+                      <span className="px-1 py-0.1 bg-amber-200 text-amber-900 rounded-full text-[9px] font-black">
+                        {currentMessages.filter(m => (m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer'))).length}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => setAdminFilter('answered')}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        adminFilter === 'answered'
+                          ? 'bg-emerald-700 text-white shadow-2xs'
+                          : 'text-stone-600 hover:text-stone-900'
+                      }`}
+                      title="Filter answered questions"
+                    >
+                      <span>✅ Answered</span>
+                      <span className="px-1 py-0.1 bg-emerald-200 text-emerald-900 rounded-full text-[9px] font-black">
+                        {currentMessages.filter(m => m.status === 'answered' || m.isOfficialReply).length}
+                      </span>
+                    </button>
+                  </div>
+                )}
+
                 <button
                   onClick={() => handleStartCall('voice')}
                   className="p-1.5 rounded-lg text-emerald-800 hover:bg-emerald-50 border border-emerald-200 transition-colors cursor-pointer"
@@ -1403,24 +1395,26 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                   <Sparkles className="w-5 h-5" />
                 </div>
                 <h4 className="font-extrabold text-sm text-stone-900">
-                  {directRecipient ? `Direct Conversation with ${directRecipient.name}` : `Welcome to #${activeChannelDef?.name}`}
+                  Welcome to #{activeChannelDef?.name}
                 </h4>
                 <p className="text-xs text-stone-500 mt-1">
-                  {directRecipient 
-                    ? 'Messages exchanged here are private between you two.'
-                    : activeChannelDef?.description}
+                  {activeChannelDef?.description}
                 </p>
               </div>
 
               {/* Message Bubbles */}
-              {currentMessages.length === 0 ? (
+              {displayedMessages.length === 0 ? (
                 <div className="text-center py-10 text-stone-400 text-xs">
-                  No messages yet in this lounge. Be the first to start the conversation! 🌿
+                  {adminFilter !== 'all' 
+                    ? `No messages found matching "${adminFilter}" filter.`
+                    : 'No messages yet in this lounge. Be the first to start the conversation! 🌿'}
                 </div>
               ) : (
-                currentMessages.map((msg) => {
+                displayedMessages.map((msg) => {
                   const isMine = currentUser?.id === msg.senderId;
                   const senderBadge = getRoleBadge(msg.senderRole);
+                  const isOfficialReply = msg.isOfficialReply || (msg.senderRole === 'admin' && Boolean(msg.replyTo));
+                  const isCustomerQuestion = msg.senderRole === 'customer' && !msg.replyTo;
 
                   return (
                     <div 
@@ -1428,7 +1422,11 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                       className={`flex gap-2.5 max-w-2xl ${isMine ? 'ml-auto flex-row-reverse' : ''}`}
                     >
                       {/* Avatar */}
-                      <div className="w-8 h-8 rounded-xl bg-stone-800 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-2xs mt-1">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 shadow-2xs mt-1 ${
+                        isOfficialReply 
+                          ? 'bg-amber-500 text-stone-950 font-black' 
+                          : 'bg-stone-800 text-white'
+                      }`}>
                         {msg.senderName.charAt(0)}
                       </div>
 
@@ -1440,7 +1438,29 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                           <span className={`text-[8px] font-extrabold px-1.5 py-0.2 rounded-md border ${senderBadge.bg}`}>
                             {senderBadge.label}
                           </span>
-                          {msg.senderRole === 'admin' && (
+                          
+                          {/* Official Admin Reply Badge */}
+                          {isOfficialReply && (
+                            <span className="text-[8px] font-black px-1.5 py-0.2 rounded-md bg-amber-400 text-stone-950 uppercase border border-amber-500 shadow-2xs flex items-center gap-1">
+                              <span>👑 Official Admin Reply</span>
+                            </span>
+                          )}
+
+                          {/* Customer Question Status Badge */}
+                          {isCustomerQuestion && (
+                            msg.status === 'answered' ? (
+                              <span className="text-[8px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                                <span>Answered by Admin</span>
+                              </span>
+                            ) : (
+                              <span className="text-[8px] font-bold px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                                <span>⏳ Awaiting Admin Reply</span>
+                              </span>
+                            )
+                          )}
+
+                          {msg.senderRole === 'admin' && !isOfficialReply && (
                             <span className="text-[8px] font-black px-1.5 py-0.2 rounded-md bg-amber-400 text-stone-950 uppercase border border-amber-300 shadow-2xs">
                               👑 Directive
                             </span>
@@ -1450,9 +1470,9 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
                         {/* Quoted message if replied */}
                         {msg.replyTo && (
-                          <div className="mb-1 p-2 rounded-xl bg-stone-200/70 text-[11px] text-stone-700 border-l-2 border-emerald-600 flex items-center gap-1.5">
-                            <CornerDownRight className="w-3 h-3 text-stone-500 shrink-0" />
-                            <span className="font-bold text-stone-900">{msg.replyTo.senderName}:</span>
+                          <div className="mb-1 p-2 rounded-xl bg-amber-50/90 text-[11px] text-stone-800 border-l-3 border-amber-500 flex items-center gap-1.5 shadow-2xs">
+                            <CornerDownRight className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span className="font-black text-amber-950">{msg.replyTo.senderName}:</span>
                             <span className="truncate italic">{msg.replyTo.content}</span>
                           </div>
                         )}
@@ -1476,9 +1496,11 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
                         {/* Message content bubble */}
                         <div className={`p-3.5 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-2xs group relative ${
-                          isMine 
-                            ? 'bg-emerald-800 text-white rounded-tr-none' 
-                            : 'bg-white text-stone-900 border border-stone-200 rounded-tl-none'
+                          isOfficialReply
+                            ? 'bg-amber-50/95 text-stone-950 border-2 border-amber-400 rounded-tl-none shadow-xs'
+                            : isMine 
+                              ? 'bg-emerald-800 text-white rounded-tr-none' 
+                              : 'bg-white text-stone-900 border border-stone-200 rounded-tl-none'
                         }`}>
                           
                           {/* Text content */}
@@ -1590,16 +1612,102 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                             </div>
                           )}
 
+                          {/* Admin Management Strip on Customer Question (Requirements 3 & 5) */}
+                          {currentUser?.role === 'admin' && isCustomerQuestion && (
+                            <div className="mt-2.5 pt-2 border-t border-stone-200/80 flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingTo(msg);
+                                  setTimeout(() => {
+                                    const inp = document.querySelector('input[placeholder*="Reply as Admin"], input[placeholder*="Ask a question"]') as HTMLInputElement;
+                                    inp?.focus();
+                                  }, 100);
+                                }}
+                                className="px-2.5 py-1 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-[11px] font-black flex items-center gap-1 shadow-2xs cursor-pointer transition-all"
+                                title="Reply officially as Administrator to this customer question"
+                              >
+                                <Reply className="w-3.5 h-3.5 text-stone-950" />
+                                <span>Reply as Admin</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleToggleStatus(msg.id, msg.status)}
+                                className="px-2 py-1 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold border border-stone-300 flex items-center gap-1 cursor-pointer transition-all"
+                                title="Toggle question resolution status"
+                              >
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>{msg.status === 'answered' ? 'Mark Pending' : 'Mark Answered'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMessage(msg.id)}
+                                className="px-2 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold border border-rose-200 flex items-center gap-1 cursor-pointer transition-all ml-auto"
+                                title="Delete this message (Admin moderation)"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Admin Deletion Action on Admin's Own Reply */}
+                          {currentUser?.role === 'admin' && isOfficialReply && (
+                            <div className="mt-2 pt-1.5 border-t border-amber-200/60 flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMessage(msg.id)}
+                                className="text-[10px] text-rose-700 hover:text-rose-900 font-bold flex items-center gap-1 cursor-pointer"
+                                title="Delete official reply"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete Reply</span>
+                              </button>
+                            </div>
+                          )}
+
                           {/* Quick action buttons on hover */}
                           <div className={`absolute -top-3 ${isMine ? 'left-2' : 'right-2'} hidden group-hover:flex items-center gap-1 bg-white border border-stone-200 shadow-md rounded-full px-2 py-0.5 z-10`}>
+                            {currentUser?.role === 'admin' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyingTo(msg);
+                                  setTimeout(() => {
+                                    const inp = document.querySelector('input[placeholder*="Reply as Admin"], input[placeholder*="Ask a question"]') as HTMLInputElement;
+                                    inp?.focus();
+                                  }, 100);
+                                }}
+                                className="text-amber-800 hover:text-amber-950 p-0.5 cursor-pointer flex items-center gap-0.5 text-[10px] font-bold"
+                                title="Reply officially as Admin"
+                              >
+                                <Reply className="w-3 h-3" />
+                                <span className="hidden sm:inline">Reply</span>
+                              </button>
+                            ) : (
+                              <span 
+                                className="text-stone-400 p-0.5 flex items-center gap-0.5 text-[9px] cursor-not-allowed"
+                                title="Only Administrator can reply to customer questions"
+                              >
+                                <Lock className="w-2.5 h-2.5" />
+                              </span>
+                            )}
+
+                            {currentUser?.role === 'admin' && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMessage(msg.id)}
+                                className="text-stone-400 hover:text-rose-600 p-0.5 cursor-pointer"
+                                title="Delete message"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
+
                             <button
-                              onClick={() => setReplyingTo(msg)}
-                              className="text-stone-500 hover:text-emerald-800 p-0.5 cursor-pointer"
-                              title="Reply to message"
-                            >
-                              <Reply className="w-3 h-3" />
-                            </button>
-                            <button
+                              type="button"
                               onClick={() => setShowEmojiPicker(showEmojiPicker === msg.id ? null : msg.id)}
                               className="text-stone-500 hover:text-amber-600 p-0.5 cursor-pointer"
                               title="React with emoji"
@@ -1934,8 +2042,10 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                         value={inputText}
                         onChange={(e) => handleInputChange(e.target.value)}
                         placeholder={
-                          directRecipient 
-                            ? `Message ${directRecipient.name}... (type or record voice note)` 
+                          activeChannelId === 'general'
+                            ? (currentUser.role === 'admin'
+                                ? (replyingTo ? `Replying as Administrator to ${replyingTo.senderName}...` : `Type official announcement or answer as Administrator...`)
+                                : `Ask a question to Fofo Green Support & Admin (e.g. avocado ripeness, delivery)...`)
                             : `Message #${activeChannelDef?.name || 'General Lounge'}...`
                         }
                         className="w-full bg-stone-100 border border-stone-200 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-900 outline-hidden focus:border-emerald-500 focus:bg-white transition-all shadow-inner"
@@ -1970,7 +2080,13 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
                       disabled={!inputText.trim() && !selectedProductToTag && pendingAttachments.length === 0 && !pendingVoiceNote}
                       className="px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
                     >
-                      <span>Send</span>
+                      <span>
+                        {currentUser.role === 'admin' && replyingTo
+                          ? 'Send Reply'
+                          : currentUser.role === 'customer' && activeChannelId === 'general'
+                            ? 'Ask Question'
+                            : 'Send'}
+                      </span>
                       <Send className="w-3.5 h-3.5" />
                     </button>
 

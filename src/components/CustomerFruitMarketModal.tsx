@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   CreditCard
 } from 'lucide-react';
-import { Product, SalesReceipt, ReceiptItem, CustomerReview } from '../types';
+import { Product, SalesReceipt, ReceiptItem, CustomerReview, User } from '../types';
+import { isProductPermittedForCustomerCapacity } from '../utils/purchasePermissions';
 
 interface CustomerFruitMarketModalProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ interface CustomerFruitMarketModalProps {
   onOpenReceipt: (receipt: SalesReceipt) => void;
   customerName?: string;
   customerPhone?: string;
+  currentUser?: User | null;
 }
 
 export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> = ({
@@ -40,11 +42,12 @@ export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> =
   onAddReview,
   onOpenReceipt,
   customerName = 'Divine Uwase',
-  customerPhone = '+250 789 112 334'
+  customerPhone = '+250 789 112 334',
+  currentUser = null
 }) => {
   const [activeTab, setActiveTab] = useState<'fruits' | 'checkout' | 'receipt'>('fruits');
   const [searchQuery, setSearchQuery] = useState('');
-  const [fruitFilter, setFruitFilter] = useState<'all' | 'berries' | 'tropical' | 'citrus'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | Product['category']>('all');
 
   // Customer Basket
   const [basket, setBasket] = useState<Array<{ product: Product; quantity: number }>>([]);
@@ -55,6 +58,11 @@ export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> =
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [generatedReceipt, setGeneratedReceipt] = useState<SalesReceipt | null>(null);
 
+  React.useEffect(() => {
+    setOrderName(customerName);
+    setOrderPhone(customerPhone);
+  }, [customerName, customerPhone, isOpen]);
+
   // Customer Feedback state
   const [feedbackRating, setFeedbackRating] = useState<number>(5);
   const [feedbackComment, setFeedbackComment] = useState<string>('');
@@ -62,13 +70,15 @@ export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> =
 
   if (!isOpen) return null;
 
-  // Filter only fruits (or fresh fruits + related organic picks)
-  const fruitProducts = products.filter(p => {
-    const isFruit = p.category === 'fruits' || p.category === 'snacks' || p.name.toLowerCase().includes('fruit') || p.name.toLowerCase().includes('berry') || p.name.toLowerCase().includes('mango') || p.name.toLowerCase().includes('avocado');
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          p.origin.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          p.description.toLowerCase().includes(searchQuery.toLowerCase());
-    return isFruit && matchesSearch;
+  // Filter strictly to products the customer is permitted to purchase in that capacity
+  const permittedProducts = products.filter(p => {
+    const permitted = isProductPermittedForCustomerCapacity(p, currentUser);
+    const matchesCat = categoryFilter === 'all' || p.category === categoryFilter;
+    const matchesSearch =
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.origin.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.description.toLowerCase().includes(searchQuery.toLowerCase());
+    return permitted && matchesCat && matchesSearch;
   });
 
   const addToBasket = (product: Product) => {
@@ -176,7 +186,7 @@ export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> =
                 <span className="text-xs text-rose-300">{orderName}</span>
               </div>
               <h2 className="text-xl font-black text-white tracking-tight">
-                Fresh Rwandan Fruit Market & Orders
+                Customer Permitted Store &amp; Express Orders
               </h2>
             </div>
           </div>
@@ -189,7 +199,7 @@ export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> =
                   activeTab === 'fruits' ? 'bg-white text-rose-950 shadow-2xs' : 'text-rose-200 hover:text-white'
                 }`}
               >
-                1. Browse Fruits
+                1. Permitted Products
               </button>
               <button
                 onClick={() => setActiveTab('checkout')}
@@ -224,28 +234,55 @@ export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> =
         {activeTab === 'fruits' && (
           <div className="p-6 max-h-[72vh] overflow-y-auto space-y-4">
             
-            {/* Search and Highlight Bar */}
-            <div className="flex flex-col sm:flex-row gap-3 justify-between items-center bg-rose-50/60 p-3.5 rounded-2xl border border-rose-200">
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search fresh mangoes, pineapples, avocados..."
-                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-stone-300 rounded-xl text-xs focus:outline-rose-600"
-                />
+            {/* Search and Category Filters for Customer-Permitted Products */}
+            <div className="space-y-3 bg-rose-50/60 p-3.5 rounded-2xl border border-rose-200">
+              <div className="flex flex-col sm:flex-row gap-3 justify-between items-center">
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-4 h-4 text-stone-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search permitted produce items..."
+                    className="w-full pl-9 pr-3 py-1.5 bg-white border border-stone-300 rounded-xl text-xs focus:outline-rose-600"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-rose-950 font-bold">
+                  <ShieldCheck className="w-4 h-4 text-emerald-700" />
+                  <span className="tabular-nums">{permittedProducts.length} customer-permitted items ready to purchase</span>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2 text-xs text-rose-950 font-bold">
-                <Sparkles className="w-4 h-4 text-rose-600" />
-                <span>100% Volcanic Soil • Certified Organic Rwandan Fruits</span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: 'all', label: 'All Permitted' },
+                  { id: 'fruits', label: 'Fruits' },
+                  { id: 'vegetables', label: 'Vegetables' },
+                  { id: 'meat', label: 'Meat & Fish' },
+                  { id: 'dairy', label: 'Dairy' },
+                  { id: 'grains', label: 'Grains & Oils' },
+                  { id: 'snacks', label: 'Snacks' },
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setCategoryFilter(cat.id as any)}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
+                      categoryFilter === cat.id
+                        ? 'bg-rose-800 text-white'
+                        : 'bg-white text-stone-700 border border-stone-200 hover:bg-stone-50'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Fruits Grid */}
+            {/* Permitted Products Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {fruitProducts.map((p) => {
+              {permittedProducts.map((p) => {
                 const inBasket = basket.find(item => item.product.id === p.id);
                 return (
                   <div
@@ -257,6 +294,7 @@ export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> =
                         <img
                           src={p.image}
                           alt={p.name}
+                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
                         <span className="absolute bottom-2 left-2 bg-emerald-800 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-md shadow-2xs">
@@ -308,7 +346,7 @@ export const CustomerFruitMarketModal: React.FC<CustomerFruitMarketModalProps> =
                           className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
                         >
                           <Plus className="w-3.5 h-3.5" />
-                          <span>Select Fruit</span>
+                          <span>Add Item</span>
                         </button>
                       )}
                     </div>

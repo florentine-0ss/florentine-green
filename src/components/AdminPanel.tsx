@@ -51,11 +51,16 @@ import {
   Store,
   Smile,
   Apple,
-  Printer
+  Printer,
+  MessageSquare,
+  Reply,
+  HelpCircle,
+  CornerDownRight
 } from 'lucide-react';
-import { Product, User, Order, SystemActivity, UserRole, StaffPermissions, FinancialRecord, SalesReceipt } from '../types';
+import { Product, User, Order, SystemActivity, UserRole, StaffPermissions, FinancialRecord, SalesReceipt, ChatMessage } from '../types';
 import { DEFAULT_ROLE_PERMISSIONS } from '../data/mockData';
 import { api, DbSystemStatus, SqlQueryResult } from '../services/api';
+import { useRealtimeCommunity } from '../context/RealtimeCommunityContext';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -64,6 +69,7 @@ interface AdminPanelProps {
   onAddProduct: (product: Product) => void;
   onDeleteProduct: (productId: number) => void;
   onToggleStock: (productId: number) => void;
+  onToggleCustomerPermitted?: (productId: number) => void;
   orders: Order[];
   onUpdateOrderStatus: (orderId: string, status: Order['status']) => void;
   users: User[];
@@ -78,7 +84,7 @@ interface AdminPanelProps {
   onSimulatePaymentAction: () => void;
   onClearActivities: () => void;
   cartCount: number;
-  initialTab?: 'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema';
+  initialTab?: 'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat';
   dbHealth?: any;
   onResetDb?: () => void;
   onOpenStockManager?: () => void;
@@ -86,6 +92,7 @@ interface AdminPanelProps {
   onOpenSalesAttendant?: () => void;
   onOpenAccountant?: () => void;
   onOpenCustomerMarket?: () => void;
+  onOpenCommunityChat?: () => void;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -95,6 +102,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onAddProduct,
   onDeleteProduct,
   onToggleStock,
+  onToggleCustomerPermitted,
   orders,
   onUpdateOrderStatus,
   users,
@@ -116,11 +124,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onOpenCashier,
   onOpenSalesAttendant,
   onOpenAccountant,
-  onOpenCustomerMarket
+  onOpenCustomerMarket,
+  onOpenCommunityChat
 }) => {
-  const [activeTab, setActiveTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat'>(initialTab);
+  const { latestMessages, deleteMessage, updateMessageStatus, openChatForResponse } = useRealtimeCommunity();
+  const [chatFilter, setChatFilter] = useState<'all' | 'pending' | 'answered'>('all');
+  const [chatSearch, setChatSearch] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<SystemActivity | null>(null);
+
+  // Sync activeTab when initialTab prop changes
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Staff Account & Access Rights Modal States
   const [isAddStaffOpen, setIsAddStaffOpen] = useState(false);
@@ -552,6 +571,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <Database className="w-4 h-4 text-emerald-700" />
             <span>Database Apply System & SQL Schema</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 whitespace-nowrap transition-colors cursor-pointer flex items-center gap-2 ${
+              activeTab === 'chat'
+                ? 'border-amber-500 text-amber-950 font-black'
+                : 'border-transparent text-stone-500 hover:text-stone-800'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4 text-amber-600" />
+            <span>Customer Support Chat</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-100 text-amber-900 border border-amber-300">
+              {latestMessages.length}
+            </span>
+          </button>
         </div>
 
         {/* Tab Content */}
@@ -882,6 +916,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <th className="p-3">Price</th>
                         <th className="p-3">Origin Farm</th>
                         <th className="p-3">Stock Status</th>
+                        <th className="p-3">Customer Access</th>
                         <th className="p-3 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -916,6 +951,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             >
                               {p.inStock ? 'In Stock' : 'Out of Stock'}
                             </button>
+                          </td>
+                          <td className="p-3">
+                            {onToggleCustomerPermitted && (
+                              <button
+                                type="button"
+                                onClick={() => onToggleCustomerPermitted(p.id)}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer transition-colors ${
+                                  p.customerPurchasable !== false
+                                    ? 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+                                    : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                                }`}
+                              >
+                                {p.customerPurchasable !== false ? 'Customer Permitted' : 'Staff Reserve'}
+                              </button>
+                            )}
                           </td>
                           <td className="p-3 text-right">
                             <button
@@ -2110,6 +2160,332 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <p className="text-xs text-stone-400 leading-relaxed">
                   The complete documentation file <code className="text-stone-300">DATABASE_SCHEMA.md</code> has been generated in the project root. It contains the comprehensive data dictionaries, column constraints, SQL DDL statements, relationship diagrams, and sample production SQL join queries.
                 </p>
+              </div>
+
+            </div>
+          )}
+
+          {/* TAB 7: CUSTOMER SUPPORT CHAT & REAL-TIME Q&A MODERATION */}
+          {activeTab === 'chat' && (
+            <div className="space-y-6">
+              
+              {/* Header Banner with Direct Lounge Launch */}
+              <div className="bg-gradient-to-r from-stone-900 via-stone-800 to-amber-950 text-white p-5 rounded-3xl shadow-sm border border-stone-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                    <span className="text-xs font-black uppercase tracking-wider text-amber-400">
+                      Public Customer Support Moderation
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-extrabold text-white">
+                    Customer Support Chat & Inquiries Hub
+                  </h3>
+                  <p className="text-xs text-stone-300 max-w-2xl leading-relaxed">
+                    All questions sent by shoppers in the public support lounge appear here in real time. As Administrator, you have exclusive authority to reply to questions, update resolution status, and moderate messages.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      if (onOpenCommunityChat) {
+                        onClose();
+                        onOpenCommunityChat();
+                      }
+                    }}
+                    className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-md transition-all cursor-pointer"
+                    title="Open Live Chat Lounge with Audio & Video Consultations"
+                  >
+                    <MessageSquare className="w-4 h-4 text-stone-950" />
+                    <span>Launch Live Support Chat & Audio/Video Lounge</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 Metric Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-2xs">
+                  <div className="text-[11px] font-bold text-stone-500 uppercase tracking-wider">Total Support Messages</div>
+                  <div className="text-2xl font-black text-stone-900 mt-1">{latestMessages.length}</div>
+                  <span className="text-[10px] text-stone-400">Shared in Public Support Feed</span>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-amber-300 bg-amber-50/40 shadow-2xs">
+                  <div className="text-[11px] font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1">
+                    <span>⏳ Awaiting Reply</span>
+                  </div>
+                  <div className="text-2xl font-black text-amber-900 mt-1">
+                    {latestMessages.filter(m => (m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer'))).length}
+                  </div>
+                  <span className="text-[10px] text-amber-800">Customer questions needing answers</span>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-emerald-300 bg-emerald-50/40 shadow-2xs">
+                  <div className="text-[11px] font-bold text-emerald-900 uppercase tracking-wider flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Answered by Admin</span>
+                  </div>
+                  <div className="text-2xl font-black text-emerald-900 mt-1">
+                    {latestMessages.filter(m => m.status === 'answered' || m.isOfficialReply).length}
+                  </div>
+                  <span className="text-[10px] text-emerald-800">Resolved customer questions</span>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-2xs">
+                  <div className="text-[11px] font-bold text-stone-500 uppercase tracking-wider flex items-center gap-1">
+                    <span>👑 Official Replies</span>
+                  </div>
+                  <div className="text-2xl font-black text-stone-900 mt-1">
+                    {latestMessages.filter(m => m.isOfficialReply).length}
+                  </div>
+                  <span className="text-[10px] text-stone-400">Published by Administrator</span>
+                </div>
+              </div>
+
+              {/* Search & Filter Toolbar */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-stone-200 shadow-2xs">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="relative w-full sm:w-72">
+                    <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-3 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Search questions or customers..."
+                      value={chatSearch}
+                      onChange={(e) => setChatSearch(e.target.value)}
+                      className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-3 py-1.5 text-xs outline-hidden focus:border-emerald-500 focus:bg-white"
+                    />
+                  </div>
+                  {chatSearch && (
+                    <button
+                      onClick={() => setChatSearch('')}
+                      className="text-stone-400 hover:text-stone-600 p-1 text-xs"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
+                  <button
+                    onClick={() => setChatFilter('all')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      chatFilter === 'all'
+                        ? 'bg-emerald-800 text-white shadow-2xs'
+                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                    }`}
+                  >
+                    All Messages ({latestMessages.length})
+                  </button>
+
+                  <button
+                    onClick={() => setChatFilter('pending')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                      chatFilter === 'pending'
+                        ? 'bg-amber-600 text-white shadow-2xs'
+                        : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                    }`}
+                  >
+                    <span>⏳ Awaiting Reply</span>
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-200 text-amber-950">
+                      {latestMessages.filter(m => (m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer'))).length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setChatFilter('answered')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                      chatFilter === 'answered'
+                        ? 'bg-emerald-700 text-white shadow-2xs'
+                        : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <span>✅ Answered</span>
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-emerald-200 text-emerald-950">
+                      {latestMessages.filter(m => m.status === 'answered' || m.isOfficialReply).length}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Messages Table & Cards */}
+              <div className="space-y-3">
+                {(() => {
+                  const filtered = latestMessages.filter(m => {
+                    if (chatFilter === 'pending') {
+                      if (!(m.status === 'pending' || (!m.isOfficialReply && !m.replyTo && m.senderRole === 'customer'))) {
+                        return false;
+                      }
+                    } else if (chatFilter === 'answered') {
+                      if (!(m.status === 'answered' || m.isOfficialReply)) {
+                        return false;
+                      }
+                    }
+                    if (chatSearch.trim()) {
+                      const q = chatSearch.toLowerCase();
+                      const matchSender = m.senderName.toLowerCase().includes(q);
+                      const matchContent = m.content.toLowerCase().includes(q);
+                      const matchRole = m.senderRole.toLowerCase().includes(q);
+                      if (!matchSender && !matchContent && !matchRole) return false;
+                    }
+                    return true;
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="bg-white rounded-2xl p-10 text-center border border-stone-200">
+                        <MessageSquare className="w-10 h-10 text-stone-300 mx-auto mb-2" />
+                        <h4 className="font-extrabold text-stone-800 text-sm">No Messages Found</h4>
+                        <p className="text-xs text-stone-500 mt-1">
+                          {chatSearch ? `No messages matching "${chatSearch}".` : 'No customer support questions currently matching this filter.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return filtered.map((msg) => {
+                    const isOfficial = msg.isOfficialReply || (msg.senderRole === 'admin' && Boolean(msg.replyTo));
+                    const isCustomer = msg.senderRole === 'customer' && !msg.replyTo;
+
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`bg-white rounded-2xl p-4 border transition-all shadow-2xs ${
+                          isOfficial 
+                            ? 'border-amber-400 bg-amber-50/20' 
+                            : isCustomer && msg.status !== 'answered' 
+                              ? 'border-amber-300 bg-amber-50/10' 
+                              : 'border-stone-200 hover:border-emerald-300'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                          
+                          {/* Sender Info & Badges */}
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs mt-0.5 ${
+                              isOfficial ? 'bg-amber-500 text-stone-950 font-black' : 'bg-stone-800 text-white'
+                            }`}>
+                              {msg.senderName.charAt(0)}
+                            </div>
+
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-extrabold text-sm text-stone-900">{msg.senderName}</span>
+                                
+                                <span className="text-[9px] px-2 py-0.5 rounded-full font-bold bg-stone-100 text-stone-700 border border-stone-200 capitalize">
+                                  {msg.senderRole.replace(/_/g, ' ')}
+                                </span>
+
+                                {isOfficial && (
+                                  <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-stone-950 border border-amber-500 uppercase shadow-2xs flex items-center gap-1">
+                                    <span>👑 Official Admin Reply</span>
+                                  </span>
+                                )}
+
+                                {isCustomer && (
+                                  msg.status === 'answered' ? (
+                                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                      <span>Answered by Admin</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                                      <span>⏳ Awaiting Admin Reply</span>
+                                    </span>
+                                  )
+                                )}
+
+                                <span className="text-[11px] text-stone-400 font-mono">{msg.timeFormatted || 'Recent'}</span>
+                              </div>
+
+                              {/* Quoted question if this is a reply */}
+                              {msg.replyTo && (
+                                <div className="mt-1.5 p-2 rounded-xl bg-amber-100/70 border-l-3 border-amber-500 text-xs text-amber-950 flex items-center gap-1.5">
+                                  <CornerDownRight className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                                  <span className="font-black">{msg.replyTo.senderName}:</span>
+                                  <span className="italic truncate">{msg.replyTo.content}</span>
+                                </div>
+                              )}
+
+                              {/* Question / Message text */}
+                              <p className="text-xs sm:text-sm text-stone-800 mt-2 whitespace-pre-wrap leading-relaxed font-medium">
+                                {msg.content}
+                              </p>
+
+                              {/* Attached Media / Photos */}
+                              {msg.attachments && msg.attachments.length > 0 && (
+                                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                  {msg.attachments.map((att) => (
+                                    <div key={att.id} className="flex items-center gap-1.5 bg-stone-100 border border-stone-200 px-2 py-1 rounded-lg text-xs">
+                                      <span className="font-bold text-stone-700">{att.name}</span>
+                                      <span className="text-[10px] text-stone-400">({att.sizeFormatted})</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Tagged Produce */}
+                              {msg.productTag && (
+                                <div className="mt-2 inline-flex items-center gap-2 p-1.5 bg-amber-50 border border-amber-200 rounded-xl text-xs">
+                                  <img src={msg.productTag.image} alt={msg.productTag.name} className="w-6 h-6 rounded-md object-cover" />
+                                  <span className="font-bold text-stone-900">{msg.productTag.name}</span>
+                                  <span className="text-emerald-700 font-mono font-bold">{msg.productTag.price.toLocaleString()} FRW</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action Buttons for Administrator */}
+                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-start">
+                            {isCustomer && (
+                              <button
+                                onClick={() => {
+                                  openChatForResponse({
+                                    channelId: msg.channelId,
+                                    prefillReply: `@${msg.senderName} `
+                                  });
+                                  if (onOpenCommunityChat) {
+                                    onClose();
+                                    onOpenCommunityChat();
+                                  }
+                                }}
+                                className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                                title="Reply as Administrator in live chat"
+                              >
+                                <Reply className="w-3.5 h-3.5" />
+                                <span>Reply as Admin</span>
+                              </button>
+                            )}
+
+                            {isCustomer && (
+                              <button
+                                onClick={() => updateMessageStatus(msg.id, msg.status === 'answered' ? 'pending' : 'answered')}
+                                className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                                title="Toggle resolution status"
+                              >
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>{msg.status === 'answered' ? 'Mark Pending' : 'Mark Answered'}</span>
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`Permanently delete this message from ${msg.senderName}?`)) {
+                                  deleteMessage(msg.id);
+                                }
+                              }}
+                              className="p-1.5 hover:bg-rose-100 text-rose-700 rounded-xl text-xs transition-colors cursor-pointer border border-rose-200"
+                              title="Delete this message (Moderation)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
 
             </div>

@@ -2,84 +2,140 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "Customer or Administrator profile linked with Firebase Auth",
+      "description": "Authenticated customer or administrator profile persisted in Firestore",
       "type": "object",
       "properties": {
-        "uid": { "type": "string", "description": "Firebase Authentication UID" },
-        "email": { "type": "string", "format": "email", "description": "User email address" },
-        "name": { "type": "string", "description": "Display name" },
-        "role": { "type": "string", "enum": ["customer", "admin"], "description": "Access control role" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Authentication UID"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 180,
+          "description": "Verified user email address"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Display name"
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Contact telephone"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["customer", "admin"],
+          "description": "Access control role"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "suspended", "pending"],
+          "description": "Account standing"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
       },
-      "required": ["uid", "email", "role"]
+      "required": ["uid", "email", "name", "role", "status", "createdAt", "updatedAt"]
     },
     "Product": {
       "title": "Product",
-      "description": "Organic fresh farm produce item in Rwanda catalog",
+      "description": "Organic fresh farm produce item with customer purchase eligibility",
       "type": "object",
       "properties": {
         "id": { "type": "number", "description": "Numeric product ID" },
-        "name": { "type": "string", "description": "Product title" },
-        "category": { "type": "string", "description": "Category slug" },
+        "name": { "type": "string", "maxLength": 140, "description": "Product title" },
+        "category": { "type": "string", "maxLength": 40, "description": "Category slug" },
         "price": { "type": "number", "description": "Price in FRW" },
-        "spec": { "type": "string", "description": "Metric packaging spec" },
-        "rating": { "type": "string", "description": "Average review rating" },
-        "image": { "type": "string", "description": "Image asset URL" },
-        "origin": { "type": "string", "description": "Rwandan district origin" },
-        "farmer": { "type": "string", "description": "Cooperative name" },
-        "inStock": { "type": "boolean", "description": "Availability toggle" }
+        "spec": { "type": "string", "maxLength": 60, "description": "Metric packaging spec" },
+        "rating": { "type": "string", "maxLength": 16, "description": "Average review rating" },
+        "image": { "type": "string", "maxLength": 500, "description": "Image asset URL" },
+        "origin": { "type": "string", "maxLength": 140, "description": "Rwandan district origin" },
+        "farmer": { "type": "string", "maxLength": 140, "description": "Cooperative name" },
+        "inStock": { "type": "boolean", "description": "Availability toggle" },
+        "customerPurchasable": { "type": "boolean", "description": "Whether retail customers are permitted to purchase" }
       },
-      "required": ["name", "category", "price", "origin", "farmer"]
+      "required": ["name", "category", "price", "origin", "farmer", "inStock"]
     },
     "Order": {
       "title": "Order",
       "description": "Customer purchase delivery record",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Human-readable code (e.g. FOFO-8842)" },
-        "customerName": { "type": "string", "description": "Recipient full name" },
-        "phone": { "type": "string", "description": "Contact telephone" },
+        "id": { "type": "string", "maxLength": 64, "description": "Human-readable code (e.g. FOFO-8842)" },
+        "customerUid": { "type": "string", "maxLength": 128, "description": "Authenticated customer Firebase UID" },
+        "customerName": { "type": "string", "maxLength": 120, "description": "Recipient full name" },
+        "phone": { "type": "string", "maxLength": 40, "description": "Contact telephone" },
         "total": { "type": "number", "description": "Total order amount in FRW" },
         "paymentMethod": { "type": "string", "enum": ["mtn", "airtel", "card", "cod"] },
-        "district": { "type": "string", "description": "Kigali destination district" },
+        "district": { "type": "string", "maxLength": 80, "description": "Destination district or zone" },
         "status": { "type": "string", "enum": ["Pending", "Preparing", "Out for Delivery", "Delivered"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "customerName", "phone", "total", "district", "status"]
+      "required": ["id", "customerUid", "customerName", "phone", "total", "district", "status", "createdAt"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Verified customer product review",
+      "type": "object",
+      "properties": {
+        "authorUid": { "type": "string", "maxLength": 128, "description": "Reviewer Firebase UID" },
+        "name": { "type": "string", "maxLength": 120, "description": "Reviewer name" },
+        "rating": { "type": "number", "description": "Star rating 1-5" },
+        "comment": { "type": "string", "maxLength": 1000, "description": "Review text" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorUid", "name", "rating", "comment", "createdAt"]
     },
     "Activity": {
       "title": "Activity",
       "description": "System event audit trail entry",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "Unique event identifier" },
-        "title": { "type": "string", "description": "Action summary" },
-        "detail": { "type": "string", "description": "Action details" },
-        "type": { "type": "string", "description": "Event category" },
-        "status": { "type": "string", "description": "Outcome severity" },
-        "actor": { "type": "string", "description": "Initiator name" },
-        "actorRole": { "type": "string", "description": "Actor role" },
+        "id": { "type": "string", "maxLength": 80, "description": "Unique event identifier" },
+        "title": { "type": "string", "maxLength": 160, "description": "Action summary" },
+        "detail": { "type": "string", "maxLength": 500, "description": "Action details" },
+        "type": { "type": "string", "maxLength": 40, "description": "Event category" },
+        "status": { "type": "string", "maxLength": 40, "description": "Outcome severity" },
+        "actor": { "type": "string", "maxLength": 120, "description": "Initiator name" },
+        "actorRole": { "type": "string", "maxLength": 40, "description": "Actor role" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["id", "title", "type", "status"]
+      "required": ["id", "title", "type", "status", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "Registered customer and administrator accounts"
+      "description": "Registered customer and administrator accounts (strictly private per owner or admin)"
     },
     "/products/{productId}": {
       "schema": "Product",
-      "description": "Fresh produce items sourced from Rwandan cooperatives"
+      "description": "Fresh produce items with customer purchase eligibility"
     },
     "/orders/{orderId}": {
       "schema": "Order",
-      "description": "Cold-chain grocery orders across Kigali"
+      "description": "Cold-chain grocery orders placed by authenticated customers"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Verified customer product reviews"
     },
     "/activities/{activityId}": {
       "schema": "Activity",
-      "description": "Immutable operational system action audit log"
+      "description": "Operational system action audit log"
     }
   }
 }

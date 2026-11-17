@@ -4,7 +4,7 @@ import {
   Printer, ArrowLeft, ChevronRight, MapPin, Phone, User as UserIcon,
   RotateCcw, Sparkles, Navigation, QrCode, Lock, Check, Send, AlertCircle
 } from 'lucide-react';
-import { CartItem, Language, Order, PaymentMethod, EbmFiscalReceipt } from '../types';
+import { CartItem, Language, Order, PaymentMethod, EbmFiscalReceipt, DeliveryZoneSelection } from '../types';
 import { TRANSLATIONS } from '../data/translations';
 import { RWANDA_LOCATIONS } from '../data/mockData';
 import { api } from '../services/api';
@@ -16,6 +16,7 @@ interface CheckoutModalProps {
   currentLang: Language;
   discountAmount: number;
   initialPaymentMethod: PaymentMethod;
+  selectedLocation?: DeliveryZoneSelection;
   onOrderComplete: (order: Order) => void;
   onReturnToCart?: () => void;
   onOpenOrderTracker?: (orderId: string) => void;
@@ -30,6 +31,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   currentLang,
   discountAmount,
   initialPaymentMethod,
+  selectedLocation,
   onOrderComplete,
   onReturnToCart,
   onOpenOrderTracker
@@ -39,8 +41,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [name, setName] = useState('');
   const [countryCode, setCountryCode] = useState('+250');
   const [phone, setPhone] = useState('788 123 456');
-  const [district, setDistrict] = useState('Gasabo');
-  const [address, setAddress] = useState('KG 14 Ave, House 24, Kibagabaga');
+  const [district, setDistrict] = useState(selectedLocation?.district || 'Gasabo');
+  const [address, setAddress] = useState(selectedLocation?.sector ? `${selectedLocation.sector} · Near Main Stage` : 'KG 14 Ave, House 24, Kibagabaga');
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(initialPaymentMethod);
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
@@ -54,10 +56,23 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [ebmFiscalReceipt, setEbmFiscalReceipt] = useState<EbmFiscalReceipt | null>(null);
   const [isAuthorizingPin, setIsAuthorizingPin] = useState(false);
 
+  useEffect(() => {
+    if (isOpen && selectedLocation) {
+      setDistrict(selectedLocation.district);
+      setAddress((prev) =>
+        prev === 'KG 14 Ave, House 24, Kibagabaga' || !prev.trim()
+          ? `${selectedLocation.sector}, ${selectedLocation.district}`
+          : prev
+      );
+    }
+  }, [isOpen, selectedLocation]);
+
   if (!isOpen) return null;
 
+  const matchedZone = RWANDA_LOCATIONS.find((l) => l.district === district);
+  const zoneFee = matchedZone ? matchedZone.fee : (selectedLocation?.fee ?? 2000);
   const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  const deliveryFee = subtotal >= 25000 || subtotal === 0 ? 0 : 2000;
+  const deliveryFee = subtotal >= 25000 || subtotal === 0 ? 0 : zoneFee;
   const grandTotal = Math.max(0, subtotal - discountAmount + deliveryFee);
 
   const handleDetailsSubmit = (e: React.FormEvent) => {

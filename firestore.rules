@@ -1,83 +1,230 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper functions
-    function isAuthenticated() {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable validation primitives
+    function isSignedIn() {
       return request.auth != null;
     }
-    
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
-    
+
     function isAdmin() {
-      return isAuthenticated() && 
-        (request.auth.token.role == 'admin' || 
-         request.auth.token.email == 'admin@fofogreen.rw' ||
-         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+      return isVerified() && (
+        request.auth.token.email == 'florentinemushimiyimana1@gmail.com' ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        )
+      );
     }
 
-    // Public catalog collections
-    match /products/{productId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
-    }
-    
-    match /categories/{categoryId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
-    }
-    
-    match /farm_passports/{passportId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
-    }
-    
-    match /meal_kits/{kitId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
-    }
-    
-    match /delivery_zones/{zoneId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
-    }
-    
-    match /store_settings/{settingId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+    // Entity validation helpers
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'name', 'role', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'name', 'phone', 'role', 'status', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 180
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 40))
+        && data.role in ['customer', 'admin']
+        && data.status in ['active', 'suspended', 'pending']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
     }
 
-    // Customer & Admin Orders
-    match /orders/{orderId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if isAuthenticated();
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'category', 'price', 'origin', 'farmer', 'inStock'])
+        && data.keys().hasOnly(['id', 'name', 'category', 'price', 'oldPrice', 'spec', 'rating', 'reviewsCount', 'image', 'badge', 'origin', 'farmer', 'description', 'inStock', 'customerPurchasable', 'calories', 'harvested'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 140
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 40
+        && data.price is number && data.price >= 0
+        && data.origin is string && data.origin.size() >= 1 && data.origin.size() <= 140
+        && data.farmer is string && data.farmer.size() >= 1 && data.farmer.size() <= 140
+        && data.inStock is bool
+        && (!('customerPurchasable' in data) || data.customerPurchasable is bool)
+        && (!('spec' in data) || (data.spec is string && data.spec.size() <= 60))
+        && (!('image' in data) || (data.image is string && data.image.size() <= 500))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1000));
     }
 
-    // Reviews
-    match /reviews/{reviewId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if isAuthenticated();
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'customerUid', 'customerName', 'phone', 'total', 'district', 'status', 'createdAt'])
+        && data.keys().hasOnly(['id', 'customerUid', 'customerName', 'phone', 'items', 'subtotal', 'discount', 'deliveryFee', 'total', 'paymentMethod', 'address', 'district', 'status', 'createdAt'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 64
+        && data.customerUid is string && data.customerUid.size() >= 1 && data.customerUid.size() <= 128
+        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120
+        && data.phone is string && data.phone.size() >= 1 && data.phone.size() <= 40
+        && data.total is number && data.total >= 0
+        && data.district is string && data.district.size() >= 1 && data.district.size() <= 80
+        && data.status in ['Pending', 'Preparing', 'Out for Delivery', 'Delivered']
+        && (!('paymentMethod' in data) || data.paymentMethod in ['mtn', 'airtel', 'card', 'cod'])
+        && (!('address' in data) || (data.address is string && data.address.size() <= 240))
+        && (!('items' in data) || (data.items is list && data.items.size() <= 100))
+        && data.createdAt is timestamp;
     }
 
-    // System Activities & Audit Logs
-    match /activities/{activityId} {
-      allow read, write: if true;
+    function isValidReview(data) {
+      return data.keys().hasAll(['authorUid', 'name', 'rating', 'comment', 'createdAt'])
+        && data.keys().hasOnly(['authorUid', 'name', 'location', 'rating', 'comment', 'productName', 'verified', 'createdAt'])
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.comment is string && data.comment.size() >= 1 && data.comment.size() <= 1000
+        && (!('location' in data) || (data.location is string && data.location.size() <= 120))
+        && (!('productName' in data) || (data.productName is string && data.productName.size() <= 140))
+        && (!('verified' in data) || data.verified is bool)
+        && data.createdAt is timestamp;
     }
 
-    // User accounts
+    function isValidActivity(data) {
+      return data.keys().hasAll(['id', 'title', 'type', 'status', 'createdAt'])
+        && data.keys().hasOnly(['id', 'title', 'detail', 'type', 'status', 'actor', 'actorRole', 'createdAt'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 80
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.type is string && data.type.size() >= 1 && data.type.size() <= 40
+        && data.status is string && data.status.size() >= 1 && data.status.size() <= 40
+        && (!('detail' in data) || (data.detail is string && data.detail.size() <= 500))
+        && (!('actor' in data) || (data.actor is string && data.actor.size() <= 120))
+        && (!('actorRole' in data) || (data.actorRole is string && data.actorRole.size() <= 40))
+        && data.createdAt is timestamp;
+    }
+
+    // Users collection: PII isolated strictly to owner or verified Admin
     match /users/{userId} {
-      allow read: if true;
-      allow write: if isOwner(userId) || isAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && existing().uid == request.auth.uid);
+      allow create: if isValidId(userId)
+        && isVerified()
+        && isOwner(userId)
+        && isValidUser(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (incoming().role == 'customer' || isAdmin());
+      allow update: if isValidId(userId)
+        && isVerified()
+        && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().status == existing().status
+            && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
     }
 
-    // Connection test document
+    // Catalog collections: readable publicly, managed exclusively by Admins
+    match /products/{productId} {
+      allow get: if isValidId(productId);
+      allow list: if true;
+      allow create, update: if isValidId(productId) && isAdmin() && isValidProduct(incoming());
+      allow delete: if isValidId(productId) && isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId);
+      allow list: if true;
+      allow write: if isValidId(categoryId) && isAdmin();
+    }
+
+    match /farm_passports/{passportId} {
+      allow get: if isValidId(passportId);
+      allow list: if true;
+      allow write: if isValidId(passportId) && isAdmin();
+    }
+
+    match /meal_kits/{kitId} {
+      allow get: if isValidId(kitId);
+      allow list: if true;
+      allow write: if isValidId(kitId) && isAdmin();
+    }
+
+    match /delivery_zones/{zoneId} {
+      allow get: if isValidId(zoneId);
+      allow list: if true;
+      allow write: if isValidId(zoneId) && isAdmin();
+    }
+
+    match /store_settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if true;
+      allow write: if isValidId(settingId) && isAdmin();
+    }
+
+    // Orders: customers read/create their own orders; admins manage all orders
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && isSignedIn() && (existing().customerUid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().customerUid == request.auth.uid || isAdmin());
+      allow create: if isValidId(orderId)
+        && isVerified()
+        && isValidOrder(incoming())
+        && incoming().customerUid == request.auth.uid
+        && incoming().status == 'Pending'
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(orderId)
+        && isVerified()
+        && isValidOrder(incoming())
+        && existing().status != 'Delivered'
+        && incoming().customerUid == existing().customerUid
+        && incoming().createdAt == existing().createdAt
+        && isAdmin();
+      allow delete: if isValidId(orderId) && isAdmin();
+    }
+
+    // Reviews: public read, authenticated customers can create their own review
+    match /reviews/{reviewId} {
+      allow get: if isValidId(reviewId);
+      allow list: if true;
+      allow create: if isValidId(reviewId)
+        && isVerified()
+        && isValidReview(incoming())
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if isValidId(reviewId) && (isAdmin() || (isVerified() && existing().authorUid == request.auth.uid));
+    }
+
+    // Activities audit log: admins only
+    match /activities/{activityId} {
+      allow get: if isValidId(activityId) && isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isValidId(activityId) && isAdmin() && isValidActivity(incoming());
+      allow delete: if isValidId(activityId) && isAdmin();
+    }
+
+    // Startup connection validation probe
     match /test/{docId} {
-      allow read, write: if true;
+      allow get: if docId == 'connection';
+      allow list, write: if false;
     }
   }
 }

@@ -233,5 +233,159 @@
     "id": "msg-1793626852385-1c0rw",
     "timestamp": "2026-11-02T13:40:52.385Z",
     "timeFormatted": "01:40 PM"
+  },
+  {
+    "id": "msg-seed-call-1",
+    "channelId": "staff-support",
+    "senderId": "usr-sales",
+    "senderName": "Kevin Niyonzima",
+    "senderRole": "sales_attendant",
+    "content": "Video consultation completed with Divine Uwase regarding personalized organic meal kits and dietary preferences.",
+    "timestamp": "2026-11-10T12:57:56.117Z",
+    "timeFormatted": "1 hr ago",
+    "reactions": {
+      "👏": [
+        "usr-customer-1",
+        "usr-admin"
+      ]
+    },
+    "callEvent": {
+      "type": "video",
+      "action": "ended",
+      "duration": "4 mins 18 secs"
+    }
+  },
+  {
+    "id": "msg-staff-admin-directive-1",
+    "channelId": "staff-internal",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "content": "👑 STAFF DIRECTIVE: Good morning team! Today we have 50kg of premium Bugesera Hass Avocados arriving. Eric (Stock Manager), please log the incoming batch in the Stock Workspace. Chantal (Cashier), ensure the MTN MoMo test QR is configured. Kevin (Sales), guide customers to the seasonal fruit displays. Aimee (Accountant), run the mid-day P&L check. Let me know your updates here!",
+    "timestamp": "2026-11-10T13:51:56.117Z",
+    "timeFormatted": "35 mins ago",
+    "reactions": {
+      "👍": [
+        "usr-stock",
+        "usr-cashier",
+        "usr-sales"
+      ],
+      "🚀": [
+        "usr-accountant"
+      ]
+    }
+  },
+  {
+    "id": "msg-staff-stock-reply-1",
+    "channelId": "staff-internal",
+    "senderId": "usr-stock",
+    "senderName": "Eric Mugisha",
+    "senderRole": "stock_manager",
+    "content": "Noted Admin Florentine! Batch #STK-882 is currently being inspected in receiving bay 2. Quality grade is pristine. Recording in the system now.",
+    "timestamp": "2026-11-10T14:03:56.117Z",
+    "timeFormatted": "25 mins ago",
+    "reactions": {
+      "👏": [
+        "usr-admin"
+      ]
+    }
+  },
+  {
+    "id": "msg-dm-admin-stock-1",
+    "channelId": "staff-internal",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "isDirectMessage": false,
+    "content": "@Eric Mugisha Please double check the damaged fruit shelf in section C and record any discarded items before 2:00 PM.",
+    "timestamp": "2026-11-10T13:57:56.117Z",
+    "timeFormatted": "30 mins ago",
+    "reactions": {
+      "📦": [
+        "usr-stock"
+      ]
+    }
+  },
+  {
+    "id": "msg-dm-admin-cashier-1",
+    "channelId": "staff-internal",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "isDirectMessage": false,
+    "content": "@Chantal Uwera We are enabling automatic RRA EBM v2 receipts for all cashier transactions. Let me know if you encounter any printer or USSD timeout issues.",
+    "timestamp": "2026-11-10T14:00:56.117Z",
+    "timeFormatted": "27 mins ago",
+    "reactions": {
+      "💳": [
+        "usr-cashier"
+      ]
+    }
+  },
+  {
+    "id": "msg-dm-admin-accountant-1",
+    "channelId": "staff-internal",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "isDirectMessage": false,
+    "content": "@Aimee Mukamana Please export this week's net profit and gross margin reports so we can review them at the management meeting.",
+    "timestamp": "2026-11-10T14:06:56.117Z",
+    "timeFormatted": "20 mins ago",
+    "reactions": {
+      "📊": [
+        "usr-accountant"
+      ]
+    }
+  },
+  {
+    "id": "msg-dm-admin-sales-1",
+    "channelId": "staff-internal",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "isDirectMessage": false,
+    "content": "@Kevin Niyonzima Remember to assist customers with the digital basket builder on the kiosk if they want help choosing between avocados and pineapples.",
+    "timestamp": "2026-11-10T14:09:56.117Z",
+    "timeFormatted": "18 mins ago",
+    "reactions": {
+      "🤝": [
+        "usr-sales"
+      ]
+    }
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-admin",
+    "senderName": "Florentine Mushimiyimana",
+    "senderRole": "admin",
+    "content": "Muraho Aline! Yes, our solar delivery motos deliver organic strawberries and fresh produce to Nyarutarama every Saturday between 8:00 AM and 1:00 PM. 🍓🛵",
+    "reactions": {},
+    "replyTo": {
+      "id": "msg-1794321603039-8arn2",
+      "senderName": "Aline Mukantwali",
+      "content": "Hello support, do you deliver fresh organic strawberries..."
+    },
+    "id": "msg-1794321611785-it47i",
+    "timestamp": "2026-11-10T14:40:11.785Z",
+    "timeFormatted": "02:40 PM",
+    "isOfficialReply": true,
+    "status": "answered",
+    "answeredBy": "Florentine Mushimiyimana",
+    "answeredAt": "2026-11-10T14:40:11.785Z"
+  },
+  {
+    "channelId": "general",
+    "senderId": "usr-cust-3",
+    "senderName": "David Rugamba",
+    "senderRole": "customer",
+    "content": "What time does the store open on Sundays?",
+    "reactions": {},
+    "id": "msg-1794321638304-vu3vr",
+    "timestamp": "2026-11-10T14:40:38.304Z",
+    "timeFormatted": "02:40 PM",
+    "isOfficialReply": false,
+    "status": "answered",
+    "answeredAt": "2026-11-10T14:40:38.399Z"
   }
 ]
