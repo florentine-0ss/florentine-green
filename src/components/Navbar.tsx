@@ -16,6 +16,7 @@ import {
   Compass,
   MessageSquare,
   Heart,
+  Presentation,
 } from 'lucide-react';
 import { Language, User, ColorTheme } from '../types';
 import { TRANSLATIONS } from '../data/translations';
@@ -36,6 +37,7 @@ export type NavbarSelection =
   | 'theme-selector'
   | 'toggle-banner'
   | 'download-zip'
+  | 'presentation'
   | 'role-admin'
   | 'role-stock'
   | 'role-cashier'
@@ -67,6 +69,7 @@ interface NavbarProps {
   onOpenCustomerFruitMarket?: () => void;
   onOpenCommunityChat?: () => void;
   onOpenAccessHub?: () => void;
+  onOpenPresentation?: () => void;
   activeNav?: NavbarSelection;
   onSelectNav?: (selection: NavbarSelection) => void;
 }
@@ -110,6 +113,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCustomerFruitMarket,
   onOpenCommunityChat,
   onOpenAccessHub,
+  onOpenPresentation,
   activeNav,
   onSelectNav,
 }) => {
@@ -199,6 +203,8 @@ export const Navbar: React.FC<NavbarProps> = ({
       onToggleMinimizeHero?.();
     } else if (value === 'download-zip') {
       window.location.href = '/api/system/download-zip';
+    } else if (value === 'presentation') {
+      onOpenPresentation?.();
     } else if (value === 'theme-selector') {
       onOpenThemeSelector();
     } else if (value === 'wishlist') {
@@ -320,6 +326,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <option value="contact">Contact &amp; WhatsApp</option>
                 </optgroup>
                 <optgroup label="Quick Tools" className="text-stone-900 bg-white">
+                  <option value="presentation">PowerPoint Presentation (.pptx)</option>
                   <option value="access-anywhere">Access Anywhere (Zones &amp; QR)</option>
                   <option value="order-tracker">Track Live Order</option>
                   <option value="wishlist">Saved Wishlist ({wishlistCount})</option>
@@ -483,6 +490,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </button>
                     )}
 
+                    {onOpenPresentation && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserDropdownOpen(false);
+                          handleNavSelect('presentation');
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-stone-100 text-stone-800 font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+                      >
+                        <Presentation className="w-4 h-4 text-emerald-700" />
+                        <span>PowerPoint Deck (.pptx)</span>
+                      </button>
+                    )}
+
                     {onOpenAccessHub && (
                       <button
                         type="button"
@@ -622,6 +643,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="pt-3 border-t border-stone-100 grid grid-cols-2 gap-2">
+            {onOpenPresentation && (
+              <button
+                type="button"
+                onClick={() => handleNavSelect('presentation')}
+                className={`col-span-2 p-2.5 rounded-xl border font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer ${
+                  selectedNavOption === 'presentation'
+                    ? 'bg-emerald-800 border-emerald-800 text-white'
+                    : 'border-stone-200 bg-stone-50 text-stone-800'
+                }`}
+              >
+                <Presentation className="w-3.5 h-3.5" />
+                <span>PowerPoint Deck (.pptx)</span>
+              </button>
+            )}
             {onOpenAccessHub && (
               <button
                 type="button"

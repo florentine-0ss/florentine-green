@@ -5,9 +5,10 @@ import { TRANSLATIONS } from '../data/translations';
 
 interface FooterProps {
   currentLang: Language;
+  onOpenPresentation?: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ currentLang }) => {
+export const Footer: React.FC<FooterProps> = ({ currentLang, onOpenPresentation }) => {
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
 
@@ -50,8 +51,19 @@ export const Footer: React.FC<FooterProps> = ({ currentLang }) => {
               Connecting Rwandan families with certified organic produce sourced directly from local cooperatives in Musanze, Bugesera, Nyagatare, and Gicumbi.
             </p>
 
-            {/* Direct System Download Buttons */}
+            {/* Direct System Download & Presentation Buttons */}
             <div className="pt-2 flex flex-wrap gap-2">
+              {onOpenPresentation && (
+                <button
+                  type="button"
+                  onClick={onOpenPresentation}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs transition-all shadow-xs cursor-pointer"
+                  title="Preview and export the Florentine-Green PowerPoint presentation (.pptx)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>PowerPoint Deck (.pptx)</span>
+                </button>
+              )}
               <a
                 href="/api/system/download-zip"
                 download="fofogreen-system.zip"

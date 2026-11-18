@@ -68,6 +68,7 @@ import { FarmPassportModal } from './components/FarmPassportModal';
 import { MealKitsSection } from './components/MealKitsSection';
 import { CommunityChatModal } from './components/CommunityChatModal';
 import { AccessAnywhereModal } from './components/AccessAnywhereModal';
+import { PresentationModal } from './components/PresentationModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { MobileBottomNav, MobileNavTab } from './components/MobileBottomNav';
@@ -228,6 +229,7 @@ export default function App() {
     offlineCache.loadLocation()
   );
   const [isAccessHubOpen, setIsAccessHubOpen] = useState(false);
+  const [isPresentationOpen, setIsPresentationOpen] = useState(false);
   const deepLinkAppliedRef = useRef(false);
 
   useEffect(() => {
@@ -1441,8 +1443,11 @@ export default function App() {
         onOpenCustomerFruitMarket={openCustomerMarket}
         onOpenCommunityChat={openCommunityChat}
         onOpenAccessHub={() => setIsAccessHubOpen(true)}
+        onOpenPresentation={() => setIsPresentationOpen(true)}
         activeNav={
-          (isCommunityChatOpen
+          (isPresentationOpen
+            ? 'presentation'
+            : isCommunityChatOpen
             ? 'community-chat'
             : isCartOpen
             ? 'cart'
@@ -1742,7 +1747,10 @@ export default function App() {
       <ContactSection currentLang={currentLang} />
 
       {/* Footer */}
-      <Footer currentLang={currentLang} />
+      <Footer
+        currentLang={currentLang}
+        onOpenPresentation={() => setIsPresentationOpen(true)}
+      />
 
       {/* Product Quick View Modal */}
       <ProductQuickViewModal
@@ -1854,6 +1862,10 @@ export default function App() {
         onOpenAccountant={() => setIsAccountantOpen(true)}
         onOpenCustomerMarket={() => setIsCustomerMarketOpen(true)}
         onOpenCommunityChat={openCommunityChat}
+        onOpenPresentation={() => {
+          setIsAdminOpen(false);
+          setIsPresentationOpen(true);
+        }}
       />
 
       {/* Role 2: Stock Manager Workspace */}
@@ -1970,6 +1982,20 @@ export default function App() {
         isCompactMode={isHeroMinimized}
         onToggleCompactMode={handleToggleHeroMinimized}
         onRefreshOfflineCache={() => offlineCache.saveProducts(products)}
+        onShowToast={showToast}
+      />
+
+      {/* Florentine-Green PowerPoint Presentation Studio */}
+      <PresentationModal
+        isOpen={isPresentationOpen}
+        onClose={() => setIsPresentationOpen(false)}
+        products={products}
+        locations={activeCountryLocations}
+        orders={orders}
+        users={users}
+        financialRecords={financialRecords}
+        activities={activities}
+        currentUser={currentUser}
         onShowToast={showToast}
       />
 

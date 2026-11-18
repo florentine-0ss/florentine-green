@@ -97,6 +97,7 @@ interface AdminPanelProps {
   onOpenAccountant?: () => void;
   onOpenCustomerMarket?: () => void;
   onOpenCommunityChat?: () => void;
+  onOpenPresentation?: () => void;
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
@@ -133,7 +134,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onOpenSalesAttendant,
   onOpenAccountant,
   onOpenCustomerMarket,
-  onOpenCommunityChat
+  onOpenCommunityChat,
+  onOpenPresentation
 }) => {
   const [activeTab, setActiveTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat' | 'locations'>(initialTab);
   const { latestMessages, refreshMessages, deleteMessage, updateMessageStatus, openChatForResponse, postOfficialAdminReply } = useRealtimeCommunity();
@@ -477,6 +479,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <Activity className="w-3.5 h-3.5" />
               <span>Audit All Actions</span>
             </button>
+
+            {onOpenPresentation && (
+              <button
+                type="button"
+                onClick={onOpenPresentation}
+                className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-stone-950 px-3 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                title="Create & download Florentine-Green PowerPoint Presentation (.pptx)"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Presentation (.pptx)</span>
+              </button>
+            )}
 
             <button
               onClick={onClose}
