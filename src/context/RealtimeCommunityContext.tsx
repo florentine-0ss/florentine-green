@@ -38,6 +38,12 @@ interface RealtimeCommunityContextType {
     content: string
   ) => Promise<{ ok: boolean; error?: string }>;
   latestMessages: ChatMessage[];
+  refreshMessages: () => Promise<void>;
+  upsertServerMessage: (
+    msg: ChatMessage,
+    parentQuestionId?: string,
+    answeredBy?: string
+  ) => void;
   sendMessage: (payload: {
     channelId: string;
     content: string;
@@ -198,6 +204,51 @@ export const RealtimeCommunityProvider: React.FC<{
     );
   }, [serverMessages, firestoreMessages]);
 
+  const refreshMessages = async () => {
+    try {
+      const res = await fetch('/api/chat/messages');
+      if (!res.ok) return;
+      const fresh = await res.json();
+      if (Array.isArray(fresh)) {
+        setServerMessages(fresh);
+      }
+    } catch {
+      // ignore transient network error
+    }
+  };
+
+  const upsertServerMessage = (
+    msg: ChatMessage,
+    parentQuestionId?: string,
+    answeredBy?: string
+  ) => {
+    setServerMessages(prev => {
+      const withParentUpdated =
+        parentQuestionId && (msg.isOfficialReply || msg.messageType === 'answer')
+          ? prev.map(m =>
+              m.id === parentQuestionId
+                ? {
+                    ...m,
+                    status: 'answered' as const,
+                    answeredBy: answeredBy || msg.senderName,
+                    answeredAt: new Date().toISOString(),
+                  }
+                : m
+            )
+          : prev;
+      if (withParentUpdated.some(m => m.id === msg.id)) {
+        return withParentUpdated.map(m => (m.id === msg.id ? msg : m));
+      }
+      return [...withParentUpdated, msg].slice(-500);
+    });
+  };
+
+  useEffect(() => {
+    if (isChatModalOpen) {
+      refreshMessages();
+    }
+  }, [isChatModalOpen]);
+
   // Connect to WebSocket server on /ws/chat
   useEffect(() => {
     let isMounted = true;
@@ -207,7 +258,7 @@ export const RealtimeCommunityProvider: React.FC<{
       .then(r => (r.ok ? r.json() : []))
       .then((initial) => {
         if (isMounted && Array.isArray(initial) && initial.length > 0) {
-          setServerMessages(prev => (prev.length === 0 ? initial : prev));
+          setServerMessages(initial);
         }
       })
       .catch(() => {});
@@ -618,6 +669,8 @@ export const RealtimeCommunityProvider: React.FC<{
         activeChatTarget,
         clearActiveChatTarget,
         latestMessages,
+        refreshMessages,
+        upsertServerMessage,
         sendMessage,
         postOfficialAdminReply,
         deleteMessage,

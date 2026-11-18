@@ -136,9 +136,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onOpenCommunityChat
 }) => {
   const [activeTab, setActiveTab] = useState<'catalog' | 'orders' | 'customers' | 'activity' | 'reports' | 'schema' | 'chat' | 'locations'>(initialTab);
-  const { latestMessages, deleteMessage, updateMessageStatus, openChatForResponse, postOfficialAdminReply } = useRealtimeCommunity();
+  const { latestMessages, refreshMessages, deleteMessage, updateMessageStatus, openChatForResponse, postOfficialAdminReply } = useRealtimeCommunity();
   const [chatFilter, setChatFilter] = useState<'all' | 'questions' | 'pending' | 'answered'>('all');
+  const [chatChannelFilter, setChatChannelFilter] = useState<string>('all');
   const [chatSearch, setChatSearch] = useState('');
+  const [isRefreshingChat, setIsRefreshingChat] = useState(false);
   const [inlineReplyTargetId, setInlineReplyTargetId] = useState<string | null>(null);
   const [inlineReplyText, setInlineReplyText] = useState('');
   const [inlineReplyError, setInlineReplyError] = useState<string | null>(null);
@@ -239,6 +241,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       loadDbSystemStatus();
+      refreshMessages();
     }
   }, [isOpen, activeTab]);
 
@@ -2306,104 +2309,157 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* Search & Filter Toolbar */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-stone-200 shadow-2xs">
-                <div className="flex items-center gap-2 w-full sm:w-auto">
-                  <div className="relative w-full sm:w-72">
-                    <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-3 pointer-events-none" />
-                    <input
-                      type="text"
-                      placeholder="Search questions or customers..."
-                      value={chatSearch}
-                      onChange={(e) => setChatSearch(e.target.value)}
-                      className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-3 py-1.5 text-xs outline-hidden focus:border-emerald-500 focus:bg-white"
-                    />
-                  </div>
-                  {chatSearch && (
+              {/* Search, Channel & Filter Toolbar */}
+              <div className="bg-white p-3 rounded-2xl border border-stone-200 shadow-2xs space-y-2.5">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <div className="relative w-full sm:w-72">
+                      <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-3 pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Search user messages or names..."
+                        value={chatSearch}
+                        onChange={(e) => setChatSearch(e.target.value)}
+                        className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-9 pr-3 py-1.5 text-xs outline-hidden focus:border-emerald-500 focus:bg-white"
+                      />
+                    </div>
+                    {chatSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setChatSearch('')}
+                        className="text-stone-400 hover:text-stone-600 p-1 text-xs cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
                     <button
-                      onClick={() => setChatSearch('')}
-                      className="text-stone-400 hover:text-stone-600 p-1 text-xs"
+                      type="button"
+                      onClick={async () => {
+                        setIsRefreshingChat(true);
+                        await refreshMessages();
+                        setIsRefreshingChat(false);
+                      }}
+                      className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                      title="Refresh messages from server"
                     >
-                      Clear
+                      <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingChat ? 'animate-spin' : ''}`} />
+                      <span>Sync</span>
                     </button>
-                  )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setChatFilter('all')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap tabular-nums ${
+                        chatFilter === 'all'
+                          ? 'bg-emerald-800 text-white shadow-2xs'
+                          : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                      }`}
+                    >
+                      All ({latestMessages.length})
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setChatFilter('questions')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap tabular-nums ${
+                        chatFilter === 'questions'
+                          ? 'bg-stone-800 text-white shadow-2xs'
+                          : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                      }`}
+                    >
+                      Questions ({latestMessages.filter(m => isQuestionMsg(m)).length})
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setChatFilter('pending')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap tabular-nums ${
+                        chatFilter === 'pending'
+                          ? 'bg-amber-600 text-white shadow-2xs'
+                          : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
+                      }`}
+                    >
+                      <span>Pending</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-200 text-amber-950">
+                        {latestMessages.filter(m => isQuestionMsg(m) && m.status !== 'answered').length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setChatFilter('answered')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap tabular-nums ${
+                        chatFilter === 'answered'
+                          ? 'bg-emerald-700 text-white shadow-2xs'
+                          : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+                      }`}
+                    >
+                      <span>Answered</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-emerald-200 text-emerald-950">
+                        {latestMessages.filter(m => (isQuestionMsg(m) && m.status === 'answered') || m.messageType === 'answer' || Boolean(m.isOfficialReply)).length}
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end flex-wrap">
-                  <button
-                    onClick={() => setChatFilter('all')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap tabular-nums ${
-                      chatFilter === 'all'
-                        ? 'bg-emerald-800 text-white shadow-2xs'
-                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                    }`}
-                  >
-                    All ({latestMessages.length})
-                  </button>
-
-                  <button
-                    onClick={() => setChatFilter('questions')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap tabular-nums ${
-                      chatFilter === 'questions'
-                        ? 'bg-stone-800 text-white shadow-2xs'
-                        : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-                    }`}
-                  >
-                    Questions ({latestMessages.filter(m => isQuestionMsg(m)).length})
-                  </button>
-
-                  <button
-                    onClick={() => setChatFilter('pending')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap tabular-nums ${
-                      chatFilter === 'pending'
-                        ? 'bg-amber-600 text-white shadow-2xs'
-                        : 'bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100'
-                    }`}
-                  >
-                    <span>Pending</span>
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-200 text-amber-950">
-                      {latestMessages.filter(m => isQuestionMsg(m) && m.status !== 'answered').length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => setChatFilter('answered')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap tabular-nums ${
-                      chatFilter === 'answered'
-                        ? 'bg-emerald-700 text-white shadow-2xs'
-                        : 'bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
-                    }`}
-                  >
-                    <span>Answered</span>
-                    <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-emerald-200 text-emerald-950">
-                      {latestMessages.filter(m => (isQuestionMsg(m) && m.status === 'answered') || m.messageType === 'answer' || Boolean(m.isOfficialReply)).length}
-                    </span>
-                  </button>
+                {/* Channel Filter Strip */}
+                <div className="flex items-center gap-1.5 pt-2 border-t border-stone-100 overflow-x-auto text-[11px]">
+                  <span className="font-bold text-stone-500 uppercase tracking-wider text-[10px] shrink-0 mr-1">
+                    Channels:
+                  </span>
+                  {[
+                    { id: 'all', label: 'All Channels' },
+                    { id: 'general', label: '#general (Support)' },
+                    { id: 'fresh-harvest', label: '#fresh-harvest' },
+                    { id: 'delivery-kigali', label: '#delivery-kigali' },
+                    { id: 'staff-support', label: '#staff-support' },
+                    { id: 'staff-internal', label: '#staff-internal' },
+                  ].map((ch) => (
+                    <button
+                      key={ch.id}
+                      type="button"
+                      onClick={() => setChatChannelFilter(ch.id)}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        chatChannelFilter === ch.id
+                          ? 'bg-stone-900 text-white'
+                          : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                      }`}
+                    >
+                      {ch.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Messages Table & Cards */}
+              {/* Messages Table & Cards (Sorted newest-first so newly typed user messages appear at the top) */}
               <div className="space-y-3">
                 {(() => {
-                  const filtered = latestMessages.filter(m => {
-                    if (chatFilter === 'questions') {
-                      if (!isQuestionMsg(m)) return false;
-                    } else if (chatFilter === 'pending') {
-                      if (!(isQuestionMsg(m) && m.status !== 'answered')) return false;
-                    } else if (chatFilter === 'answered') {
-                      if (!((isQuestionMsg(m) && m.status === 'answered') || m.messageType === 'answer' || Boolean(m.isOfficialReply))) {
+                  const filtered = [...latestMessages]
+                    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+                    .filter(m => {
+                      if (chatChannelFilter !== 'all' && (m.channelId || 'general') !== chatChannelFilter) {
                         return false;
                       }
-                    }
-                    if (chatSearch.trim()) {
-                      const q = chatSearch.toLowerCase();
-                      const matchSender = m.senderName.toLowerCase().includes(q);
-                      const matchContent = m.content.toLowerCase().includes(q);
-                      const matchRole = m.senderRole.toLowerCase().includes(q);
-                      if (!matchSender && !matchContent && !matchRole) return false;
-                    }
-                    return true;
-                  });
+                      if (chatFilter === 'questions') {
+                        if (!isQuestionMsg(m)) return false;
+                      } else if (chatFilter === 'pending') {
+                        if (!(isQuestionMsg(m) && m.status !== 'answered')) return false;
+                      } else if (chatFilter === 'answered') {
+                        if (!((isQuestionMsg(m) && m.status === 'answered') || m.messageType === 'answer' || Boolean(m.isOfficialReply))) {
+                          return false;
+                        }
+                      }
+                      if (chatSearch.trim()) {
+                        const q = chatSearch.toLowerCase();
+                        const matchSender = m.senderName.toLowerCase().includes(q);
+                        const matchContent = m.content.toLowerCase().includes(q);
+                        const matchRole = m.senderRole.toLowerCase().includes(q);
+                        if (!matchSender && !matchContent && !matchRole) return false;
+                      }
+                      return true;
+                    });
 
                   if (filtered.length === 0) {
                     return (
@@ -2422,6 +2478,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     const isQuestion = isQuestionMsg(msg);
                     const isReply = !isOfficial && (msg.messageType === 'reply' || Boolean(msg.replyTo));
                     const isInlineOpen = inlineReplyTargetId === msg.id;
+                    const linkedAdminAnswers = !isOfficial
+                      ? latestMessages.filter(
+                          (reply) =>
+                            reply.replyTo?.id === msg.id &&
+                            (reply.messageType === 'answer' || Boolean(reply.isOfficialReply) || reply.senderRole === 'admin')
+                        )
+                      : [];
 
                     return (
                       <div
@@ -2516,6 +2579,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                   <img src={msg.productTag.image} alt={msg.productTag.name} className="w-6 h-6 rounded-md object-cover" />
                                   <span className="font-bold text-stone-900">{msg.productTag.name}</span>
                                   <span className="text-emerald-700 font-mono font-bold">{msg.productTag.price.toLocaleString()} FRW</span>
+                                </div>
+                              )}
+
+                              {/* Linked Admin Responses visible right on the user's card */}
+                              {linkedAdminAnswers.length > 0 && (
+                                <div className="mt-2.5 space-y-1.5">
+                                  {linkedAdminAnswers.map((ans) => (
+                                    <div
+                                      key={ans.id}
+                                      className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-xs text-stone-900"
+                                    >
+                                      <div className="flex items-center justify-between gap-2 mb-1">
+                                        <span className="font-black text-amber-950 text-[11px]">
+                                          Admin Response · {ans.senderName}
+                                        </span>
+                                        <span className="text-[10px] text-stone-500 font-mono">
+                                          {ans.timeFormatted || 'Just now'}
+                                        </span>
+                                      </div>
+                                      <p className="whitespace-pre-wrap leading-relaxed">{ans.content}</p>
+                                    </div>
+                                  ))}
                                 </div>
                               )}
 

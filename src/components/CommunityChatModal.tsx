@@ -26,7 +26,7 @@ interface CommunityChatModalProps {
   onClose: () => void;
   currentUser: User | null;
   onOpenAuth: () => void;
-  onQuickJoinCustomer?: (displayName: string) => void;
+  onQuickJoinCustomer?: (displayName: string) => User | null | void;
   availableProducts: Product[];
   joinedUsers: User[];
 }
@@ -95,6 +95,8 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     clearActiveChatTarget,
     onlineUsers: globalOnlineUsers,
     latestMessages: contextLatestMessages,
+    refreshMessages,
+    upsertServerMessage,
     chatError: contextChatError,
     clearChatError
   } = useRealtimeCommunity();
@@ -105,6 +107,7 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [composerMode, setComposerMode] = useState<'question' | 'message'>('question');
   const [guestNameInput, setGuestNameInput] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [localChatError, setLocalChatError] = useState<string | null>(null);
   const [confirmDeleteMsgId, setConfirmDeleteMsgId] = useState<string | null>(null);
   const [selectedProductToTag, setSelectedProductToTag] = useState<Product | null>(null);
@@ -641,17 +644,39 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
   // --- SEND MESSAGE HANDLER ---
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (isSendingMessage) return;
     if (!inputText.trim() && !selectedProductToTag && pendingAttachments.length === 0 && !pendingVoiceNote) return;
 
-    if (!currentUser) {
-      setLocalChatError('Enter your name below to join the chat or sign in first.');
-      return;
+    // Resolve active sender: use signed-in user, or auto-join cleanly with entered display name (or Guest Customer)
+    let activeSender: { id: string; name: string; role: string } | null = currentUser
+      ? { id: currentUser.id, name: currentUser.name, role: currentUser.role }
+      : null;
+
+    if (!activeSender) {
+      const displayName = guestNameInput.trim() || 'Guest Customer';
+      const joinedUser = onQuickJoinCustomer ? onQuickJoinCustomer(displayName) : null;
+      if (joinedUser && typeof joinedUser === 'object' && 'id' in joinedUser) {
+        activeSender = { id: joinedUser.id, name: joinedUser.name, role: joinedUser.role };
+      } else {
+        let fallbackGuestId = 'usr-guest-visitor';
+        try {
+          const existingId = sessionStorage.getItem('fofo_guest_id');
+          if (existingId) {
+            fallbackGuestId = existingId;
+          } else {
+            fallbackGuestId = `gst-${Date.now().toString().slice(-5)}`;
+            sessionStorage.setItem('fofo_guest_id', fallbackGuestId);
+          }
+        } catch {}
+        activeSender = { id: fallbackGuestId, name: displayName, role: 'customer' };
+      }
+      setGuestNameInput('');
     }
 
     const replyingToQuestion = replyingTo ? isQuestionMessage(replyingTo) : false;
 
     // Client-side guard matching server & Firestore rules: only Admin can answer questions
-    if (replyingToQuestion && currentUser.role !== 'admin') {
+    if (replyingToQuestion && activeSender.role !== 'admin') {
       setLocalChatError('Only the Admin is permitted to provide answers to questions.');
       setReplyingTo(null);
       return;
@@ -659,8 +684,14 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
 
     setLocalChatError(null);
     clearChatError();
+    setIsSendingMessage(true);
 
-    const isOfficialReply = currentUser.role === 'admin' && Boolean(replyingTo);
+    // Ensure user's newly typed message is always immediately visible in the feed
+    if (messageFilter === 'answered') {
+      setMessageFilter('all');
+    }
+
+    const isOfficialReply = activeSender.role === 'admin' && Boolean(replyingTo);
     const resolvedType: ChatMessageType = isOfficialReply
       ? 'answer'
       : replyingTo
@@ -672,18 +703,22 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     const now = new Date();
     const optimisticId = `msg-opt-${Date.now()}`;
     lastOptimisticIdRef.current = optimisticId;
+    const replyParentId = replyingTo?.id;
+    const trimmedContent =
+      inputText.trim() ||
+      (pendingVoiceNote ? '🎙️ Voice message' : pendingAttachments.length > 0 ? '📎 Attachment' : '');
 
     const payload: Partial<ChatMessage> = {
       channelId: currentChannel,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      senderRole: currentUser.role,
+      senderId: activeSender.id,
+      senderName: activeSender.name,
+      senderRole: activeSender.role,
       messageType: resolvedType,
-      content: inputText.trim() || (pendingVoiceNote ? '🎙️ Voice message' : pendingAttachments.length > 0 ? '📎 Attachment' : ''),
+      content: trimmedContent,
       reactions: {},
       isOfficialReply,
       status: isOfficialReply ? 'answered' : resolvedType === 'question' ? 'pending' : 'open',
-      answeredBy: isOfficialReply ? currentUser.name : undefined,
+      answeredBy: isOfficialReply ? activeSender.name : undefined,
       answeredAt: isOfficialReply ? now.toISOString() : undefined,
       replyTo: replyingTo ? {
         id: replyingTo.id,
@@ -706,11 +741,11 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     const optimisticMsg: ChatMessage = {
       id: optimisticId,
       channelId: currentChannel,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      senderRole: currentUser.role,
+      senderId: activeSender.id,
+      senderName: activeSender.name,
+      senderRole: activeSender.role,
       messageType: resolvedType,
-      content: payload.content || '',
+      content: trimmedContent,
       timestamp: now.toISOString(),
       timeFormatted: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       reactions: {},
@@ -726,8 +761,8 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     };
 
     // If Admin is answering a question, update the parent question's status optimistically
-    if (isOfficialReply && replyingTo?.id) {
-      setMessages(prev => prev.map(m => m.id === replyingTo.id ? { ...m, status: 'answered', answeredBy: currentUser.name, answeredAt: now.toISOString() } : m));
+    if (isOfficialReply && replyParentId) {
+      setMessages(prev => prev.map(m => m.id === replyParentId ? { ...m, status: 'answered', answeredBy: activeSender!.name, answeredAt: now.toISOString() } : m));
     }
 
     setMessages(prev => [...prev, optimisticMsg]);
@@ -738,27 +773,45 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
     setPendingAttachments([]);
     setPendingVoiceNote(null);
 
-    // Send via WebSocket if open
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({
-        type: 'chat:send',
-        payload
-      }));
-    } else {
-      try {
-        const res = await fetch('/api/chat/messages', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+    try {
+      // Authoritative save via REST API (persists to server store and broadcasts live via /ws/chat)
+      const res = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setLocalChatError(errData?.error || 'Could not send message.');
+        setMessages(prev => prev.filter(m => m.id !== optimisticId));
+        setInputText(trimmedContent);
+      } else {
+        const savedMsg: ChatMessage = await res.json();
+        lastOptimisticIdRef.current = null;
+        setMessages(prev => {
+          const withoutOpt = prev.filter(m => m.id !== optimisticId);
+          if (withoutOpt.some(m => m.id === savedMsg.id)) return withoutOpt;
+          return [...withoutOpt, savedMsg];
         });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          setLocalChatError(errData?.error || 'Could not send message.');
-          setMessages(prev => prev.filter(m => m.id !== optimisticId));
-        }
-      } catch (err) {
-        console.error('[Chat] Failed REST fallback message send:', err);
+        upsertServerMessage(savedMsg, isOfficialReply ? replyParentId : undefined, activeSender.name);
+        refreshMessages();
       }
+    } catch (err) {
+      console.error('[Chat] Message send error:', err);
+      // Fallback attempt over WebSocket if REST transiently failed
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({
+          type: 'chat:send',
+          payload
+        }));
+      } else {
+        setLocalChatError('Network error while sending message. Please try again.');
+        setMessages(prev => prev.filter(m => m.id !== optimisticId));
+        setInputText(trimmedContent);
+      }
+    } finally {
+      setIsSendingMessage(false);
     }
 
     // Sync to Firestore when Firebase user is email-verified
@@ -766,10 +819,10 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
       publishChatMessageToFirestore({
         id: optimisticId,
         channelId: currentChannel,
-        senderName: currentUser.name,
-        senderRole: currentUser.role,
+        senderName: activeSender.name,
+        senderRole: activeSender.role,
         messageType: resolvedType,
-        content: payload.content || '',
+        content: trimmedContent,
         isOfficialReply,
         replyTo: payload.replyTo,
       }).catch(err => console.warn('[Chat] Firestore sync warning:', err));
@@ -2214,212 +2267,197 @@ export const CommunityChatModal: React.FC<CommunityChatModalProps> = ({
               </div>
             )}
 
-            {/* INPUT COMPOSER / SEND BAR WITH MODE TOGGLE & QUICK JOIN */}
-            <div className="p-3 bg-white border-t border-stone-200 shrink-0">
-              {currentUser ? (
-                <form onSubmit={handleSendMessage} className="space-y-2">
-                  
-                  {/* MEDIA TOOLBAR + COMPOSER MODE TOGGLE */}
-                  <div className="flex items-center justify-between text-xs pb-1 border-b border-stone-100 gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 sm:gap-2">
-                      
-                      {/* Ask Question vs Post Message mode (when not replying) */}
-                      {!replyingTo && (
-                        <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200">
-                          <button
-                            type="button"
-                            onClick={() => setComposerMode('question')}
-                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                              composerMode === 'question'
-                                ? 'bg-amber-400 text-stone-950 shadow-2xs'
-                                : 'text-stone-600 hover:text-stone-900'
-                            }`}
-                          >
-                            Ask Question
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setComposerMode('message')}
-                            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
-                              composerMode === 'message'
-                                ? 'bg-emerald-800 text-white shadow-2xs'
-                                : 'text-stone-600 hover:text-stone-900'
-                            }`}
-                          >
-                            Post Message
-                          </button>
-                        </div>
-                      )}
-
-                      {/* 1. APPLY IMAGE BUTTON */}
-                      <button
-                        type="button"
-                        onClick={() => setShowImagePickerModal(!showImagePickerModal)}
-                        className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                          pendingAttachments.some(a => a.type === 'image')
-                            ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
-                            : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
-                        }`}
-                        title="Apply an Image / Produce Photo"
-                      >
-                        <ImageIcon className="w-3.5 h-3.5 text-emerald-700" />
-                        <span className="hidden md:inline">Image</span>
-                      </button>
-
-                      {/* 2. ATTACH FILE BUTTON */}
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                          pendingAttachments.some(a => a.type === 'file')
-                            ? 'bg-blue-100 text-blue-950 border-blue-300'
-                            : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
-                        }`}
-                        title="Attach Document or Receipt (PDF, DOC, TXT)"
-                      >
-                        <Paperclip className="w-3.5 h-3.5 text-blue-700" />
-                        <span className="hidden md:inline">File</span>
-                      </button>
-
-                      {/* 3. TAG PRODUCE BUTTON */}
-                      <button
-                        type="button"
-                        onClick={() => setShowProductPicker(!showProductPicker)}
-                        className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                          selectedProductToTag
-                            ? 'bg-amber-100 text-amber-950 border-amber-300'
-                            : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
-                        }`}
-                        title="Tag Farm Produce from Catalog"
-                      >
-                        <ShoppingBag className="w-3.5 h-3.5 text-amber-700" />
-                        <span className="hidden md:inline">Tag Produce</span>
-                      </button>
-
-                    </div>
-
-                    {/* Quick Call shortcuts indicator */}
-                    <div className="flex items-center gap-1 text-[11px] text-stone-400">
-                      <span>Live Call:</span>
-                      <button
-                        type="button"
-                        onClick={() => handleStartCall('voice')}
-                        className="text-emerald-700 font-bold hover:underline cursor-pointer"
-                      >
-                        Audio
-                      </button>
-                      <span>•</span>
-                      <button
-                        type="button"
-                        onClick={() => handleStartCall('video')}
-                        className="text-violet-700 font-bold hover:underline cursor-pointer"
-                      >
-                        Video
-                      </button>
-                    </div>
+            {/* INPUT COMPOSER / SEND BAR — ALWAYS VISIBLE SO USERS CAN TYPE & SEND */}
+            <div className="p-3 bg-white border-t border-stone-200 shrink-0 space-y-2">
+              {!currentUser && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 rounded-2xl bg-emerald-50/80 border border-emerald-200">
+                  <div className="flex items-center gap-2 text-[11px] text-emerald-950">
+                    <UserIcon className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                    <span>Type a message below — it becomes immediately visible so the Admin can read and respond.</span>
                   </div>
-
-                  {/* MAIN INPUT ROW: TEXT INPUT, VOICE NOTE BUTTON, SEND BUTTON */}
-                  <div className="flex items-center gap-2">
-                    
-                    {/* Text input */}
-                    <div className="flex-1 relative">
-                      <input
-                        ref={composerInputRef}
-                        type="text"
-                        value={inputText}
-                        onChange={(e) => handleInputChange(e.target.value)}
-                        placeholder={
-                          replyingTo
-                            ? currentUser.role === 'admin'
-                              ? `Write official Admin answer to ${replyingTo.senderName}...`
-                              : `Write your reply to ${replyingTo.senderName}...`
-                            : composerMode === 'question'
-                            ? `Ask a question for Admin to answer in #${activeChannelDef?.name || 'General Lounge'}...`
-                            : `Post a message in #${activeChannelDef?.name || 'General Lounge'}...`
-                        }
-                        className="w-full bg-stone-100 border border-stone-200 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-900 outline-hidden focus:border-emerald-500 focus:bg-white transition-all shadow-inner"
-                      />
-                    </div>
-
-                    {/* VOICE MESSAGE / NOTE RECORDING BUTTON */}
-                    {!isRecordingVoice ? (
-                      <button
-                        type="button"
-                        onClick={handleStartVoiceRecording}
-                        className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-2xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer shrink-0"
-                        title="Click to Record a Voice Message / Audio Note"
-                      >
-                        <Mic className="w-4 h-4 text-rose-600" />
-                        <span className="hidden md:inline">Voice Note</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleStopAndSaveVoiceRecording}
-                        className="px-3 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer shrink-0 animate-pulse"
-                      >
-                        <Check className="w-4 h-4" />
-                        <span>Done</span>
-                      </button>
-                    )}
-
-                    {/* SEND BUTTON */}
-                    <button
-                      type="submit"
-                      disabled={!inputText.trim() && !selectedProductToTag && pendingAttachments.length === 0 && !pendingVoiceNote}
-                      className="px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0 whitespace-nowrap"
-                    >
-                      <span>
-                        {replyingTo
-                          ? currentUser.role === 'admin'
-                            ? 'Post Answer'
-                            : 'Send Reply'
-                          : composerMode === 'question'
-                            ? 'Ask Question'
-                            : 'Send'}
-                      </span>
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
-
-                  </div>
-
-                </form>
-              ) : (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-2.5 rounded-2xl bg-amber-50 border border-amber-200">
-                  <div className="flex items-center gap-2 text-xs text-amber-950">
-                    <UserIcon className="w-4 h-4 text-amber-700 shrink-0" />
-                    <span>Reading all public messages. Join below to ask questions or reply to discussions.</span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    {onQuickJoinCustomer && (
-                      <form onSubmit={handleQuickJoinSubmit} className="flex items-center gap-1.5">
-                        <input
-                          type="text"
-                          value={guestNameInput}
-                          onChange={(e) => setGuestNameInput(e.target.value)}
-                          placeholder="Your name..."
-                          className="w-36 sm:w-44 bg-white border border-amber-300 rounded-xl px-2.5 py-1.5 text-xs text-stone-900 outline-hidden focus:border-emerald-600"
-                        />
-                        <button
-                          type="submit"
-                          disabled={!guestNameInput.trim()}
-                          className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-45 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                        >
-                          Join Chat
-                        </button>
-                      </form>
-                    )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <input
+                      type="text"
+                      value={guestNameInput}
+                      onChange={(e) => setGuestNameInput(e.target.value)}
+                      placeholder="Your name (optional)"
+                      className="w-36 sm:w-40 bg-white border border-emerald-300 rounded-xl px-2.5 py-1 text-xs text-stone-900 outline-hidden focus:border-emerald-600"
+                    />
                     <button
                       type="button"
                       onClick={onOpenAuth}
-                      className="px-3 py-1.5 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                      className="px-2.5 py-1 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-xl text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                     >
                       Sign In
                     </button>
                   </div>
                 </div>
               )}
+
+              <form onSubmit={handleSendMessage} className="space-y-2">
+                {/* MEDIA TOOLBAR + COMPOSER MODE TOGGLE */}
+                <div className="flex items-center justify-between text-xs pb-1 border-b border-stone-100 gap-2 flex-wrap">
+                  <div className="flex items-center gap-1 sm:gap-2">
+                    {/* Ask Question vs Post Message mode (when not replying) */}
+                    {!replyingTo && (
+                      <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200">
+                        <button
+                          type="button"
+                          onClick={() => setComposerMode('question')}
+                          className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                            composerMode === 'question'
+                              ? 'bg-amber-400 text-stone-950 shadow-2xs'
+                              : 'text-stone-600 hover:text-stone-900'
+                          }`}
+                        >
+                          Ask Question
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setComposerMode('message')}
+                          className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                            composerMode === 'message'
+                              ? 'bg-emerald-800 text-white shadow-2xs'
+                              : 'text-stone-600 hover:text-stone-900'
+                          }`}
+                        >
+                          Post Message
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 1. APPLY IMAGE BUTTON */}
+                    <button
+                      type="button"
+                      onClick={() => setShowImagePickerModal(!showImagePickerModal)}
+                      className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        pendingAttachments.some(a => a.type === 'image')
+                          ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
+                          : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
+                      }`}
+                      title="Apply an Image / Produce Photo"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-700" />
+                      <span className="hidden md:inline">Image</span>
+                    </button>
+
+                    {/* 2. ATTACH FILE BUTTON */}
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        pendingAttachments.some(a => a.type === 'file')
+                          ? 'bg-blue-100 text-blue-950 border-blue-300'
+                          : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
+                      }`}
+                      title="Attach Document or Receipt (PDF, DOC, TXT)"
+                    >
+                      <Paperclip className="w-3.5 h-3.5 text-blue-700" />
+                      <span className="hidden md:inline">File</span>
+                    </button>
+
+                    {/* 3. TAG PRODUCE BUTTON */}
+                    <button
+                      type="button"
+                      onClick={() => setShowProductPicker(!showProductPicker)}
+                      className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        selectedProductToTag
+                          ? 'bg-amber-100 text-amber-950 border-amber-300'
+                          : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-200'
+                      }`}
+                      title="Tag Farm Produce from Catalog"
+                    >
+                      <ShoppingBag className="w-3.5 h-3.5 text-amber-700" />
+                      <span className="hidden md:inline">Tag Produce</span>
+                    </button>
+                  </div>
+
+                  {/* Quick Call shortcuts indicator */}
+                  <div className="flex items-center gap-1 text-[11px] text-stone-400">
+                    <span>Live Call:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleStartCall('voice')}
+                      className="text-emerald-700 font-bold hover:underline cursor-pointer"
+                    >
+                      Audio
+                    </button>
+                    <span>•</span>
+                    <button
+                      type="button"
+                      onClick={() => handleStartCall('video')}
+                      className="text-violet-700 font-bold hover:underline cursor-pointer"
+                    >
+                      Video
+                    </button>
+                  </div>
+                </div>
+
+                {/* MAIN INPUT ROW: TEXT INPUT, VOICE NOTE BUTTON, SEND BUTTON */}
+                <div className="flex items-center gap-2">
+                  {/* Text input */}
+                  <div className="flex-1 relative">
+                    <input
+                      ref={composerInputRef}
+                      type="text"
+                      value={inputText}
+                      onChange={(e) => handleInputChange(e.target.value)}
+                      placeholder={
+                        replyingTo
+                          ? currentUser?.role === 'admin'
+                            ? `Write official Admin response to ${replyingTo.senderName}...`
+                            : `Write your reply to ${replyingTo.senderName}...`
+                          : composerMode === 'question'
+                          ? `Type your question or message for Admin in #${activeChannelDef?.name || 'General Lounge'}...`
+                          : `Type your message in #${activeChannelDef?.name || 'General Lounge'}...`
+                      }
+                      className="w-full bg-stone-100 border border-stone-200 rounded-2xl px-4 py-2.5 text-xs sm:text-sm text-stone-900 outline-hidden focus:border-emerald-500 focus:bg-white transition-all shadow-inner"
+                    />
+                  </div>
+
+                  {/* VOICE MESSAGE / NOTE RECORDING BUTTON */}
+                  {!isRecordingVoice ? (
+                    <button
+                      type="button"
+                      onClick={handleStartVoiceRecording}
+                      className="px-3 py-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 rounded-2xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer shrink-0"
+                      title="Click to Record a Voice Message / Audio Note"
+                    >
+                      <Mic className="w-4 h-4 text-rose-600" />
+                      <span className="hidden md:inline">Voice Note</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleStopAndSaveVoiceRecording}
+                      className="px-3 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-bold text-xs flex items-center gap-1.5 transition-all shadow-md cursor-pointer shrink-0 animate-pulse"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Done</span>
+                    </button>
+                  )}
+
+                  {/* SEND BUTTON */}
+                  <button
+                    type="submit"
+                    disabled={isSendingMessage || (!inputText.trim() && !selectedProductToTag && pendingAttachments.length === 0 && !pendingVoiceNote)}
+                    className="px-4 py-2.5 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl font-bold text-xs sm:text-sm flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    <span>
+                      {isSendingMessage
+                        ? 'Sending...'
+                        : replyingTo
+                        ? currentUser?.role === 'admin'
+                          ? 'Post Answer'
+                          : 'Send Reply'
+                        : composerMode === 'question'
+                          ? 'Send Question'
+                          : 'Send'}
+                    </span>
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </form>
             </div>
 
           </main>

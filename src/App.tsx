@@ -121,9 +121,9 @@ export default function App() {
     setIsCommunityChatOpen(true);
   };
 
-  const handleQuickJoinChatCustomer = (displayName: string) => {
+  const handleQuickJoinChatCustomer = (displayName: string): User | null => {
     const cleanName = displayName.trim().slice(0, 60);
-    if (!cleanName) return;
+    if (!cleanName) return null;
     const joinedCustomer: User = {
       id: `usr-joined-${Date.now().toString().slice(-5)}`,
       name: cleanName,
@@ -155,6 +155,7 @@ export default function App() {
       actorRole: 'customer',
     };
     setActivities((prev) => [joinAct, ...prev]);
+    return joinedCustomer;
   };
 
   const openCustomerMarket = () => {

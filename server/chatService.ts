@@ -754,14 +754,41 @@ class ChatService {
 
             case 'chat:send': {
               const payload = parsed.payload;
-              const meta = this.connectedSockets.get(ws);
-              if (!meta?.userId || !payload?.content) break;
+              let meta = this.connectedSockets.get(ws);
+
+              const hasPayloadBody = Boolean(
+                (typeof payload?.content === 'string' && payload.content.trim().length > 0) ||
+                (Array.isArray(payload?.attachments) && payload.attachments.length > 0) ||
+                payload?.voiceNote ||
+                payload?.callEvent
+              );
+
+              if (!hasPayloadBody) {
+                ws.send(JSON.stringify({
+                  type: 'chat:error',
+                  payload: { message: 'Please type a message or attach media before sending.' }
+                }));
+                break;
+              }
+
+              // If the socket sent a message before presence:join finished, bind a safe non-admin identity from payload
+              if (!meta?.userId) {
+                const fallbackId = typeof payload?.senderId === 'string' && payload.senderId.trim()
+                  ? payload.senderId.trim().slice(0, 80)
+                  : `gst-${Date.now()}`;
+                const fallbackName = typeof payload?.senderName === 'string' && payload.senderName.trim()
+                  ? payload.senderName.trim().slice(0, 80)
+                  : 'Guest Customer';
+                meta = { userId: fallbackId, userName: fallbackName, role: 'customer' };
+                this.connectedSockets.set(ws, meta);
+              }
 
               try {
-                // Trust the authenticated socket identity, never a client-supplied sender.
-                // addMessage enforces that anyone can post/reply/ask questions while ONLY admin can answer questions.
+                // Trust the authenticated socket identity for admin privileges,
+                // while addMessage enforces that only admin can answer questions.
                 this.addMessage({
                   ...payload,
+                  content: typeof payload?.content === 'string' ? payload.content : '',
                   senderId: meta.userId,
                   senderName: meta.userName || 'Joined Member',
                   senderRole: meta.role || 'customer'
